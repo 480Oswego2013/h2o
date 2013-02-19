@@ -2,6 +2,8 @@ package water.util;
 
 import com.google.common.io.ByteStreams;
 import com.google.common.io.CharStreams;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import hex.rf.*;
 import java.io.File;
 import java.io.PrintWriter;
@@ -31,6 +33,18 @@ public class TreeRenderer {
     long dl = Tree.depth_leaves(new AutoBuffer(_treeBits));
     int leaves= (int)(dl&0xFFFFFFFFL);
     _nodeCount = leaves*2-1;
+  }
+
+  public JsonElement json() {
+    try {
+      JsonObject root = new JsonObject();
+      new JsonSerializer(root, _columns, _domain).walk_serialized_tree(new AutoBuffer(_treeBits));
+      return root;
+    } catch( Exception e ) {
+      e.printStackTrace();
+      //return errorRender(e);
+      return null;
+    }
   }
 
   public String code() {
