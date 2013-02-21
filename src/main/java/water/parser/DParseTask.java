@@ -187,6 +187,7 @@ public final class DParseTask extends MRTask {
   transient final Value _sourceDataset;
   transient int _colIdx;
 
+  public boolean isString(int idx) { return _colTypes[idx]==STRINGCOL; }
 
   // As this is only used for distributed CSV parser we initialize the values
   // for the CSV parser itself.
@@ -224,8 +225,6 @@ public final class DParseTask extends MRTask {
     _skipFirstLine = other._skipFirstLine;
     _myrows = other._myrows; // for simple values, number of rows is kept in the member variable instead of _nrows
     _job = other._job;
-    _colTypes = other._colTypes;
-    _nrows = other._nrows;
     _numRows = other._numRows;
     _sep = other._sep;
     _decSep = other._decSep;
@@ -237,6 +236,7 @@ public final class DParseTask extends MRTask {
     _sigma = other._sigma;
     _colNames = other._colNames;
     _error = other._error;
+    _invalidValues = other._invalidValues;
   }
 
   /** Creates a phase one dparse task.
@@ -348,6 +348,10 @@ public final class DParseTask extends MRTask {
    * option for their distributed processing.
    */
   public void passTwo() throws Exception {
+    // make sure we delete previous array here, because we insert arraylet header after all chunks are stored in
+    // so if we do not delete it now, it will be deleted by UKV automatically later and destroy our values!
+    if(DKV.get(_job._dest) != null)
+      UKV.remove(_job._dest);
     switch (_parserType) {
       case CSV:
         // for CSV parser just launch the distributed parser on the chunks
@@ -641,6 +645,17 @@ public final class DParseTask extends MRTask {
     assert (_bases != null);
     assert (_min != null);
     for(int i = 0; i < _ncolumns; ++i){
+      // Entirely toss out numeric columns which are largely broken.
+      if( (_colTypes[i]==ICOL || _colTypes[i]==DCOL || _colTypes[i]==FCOL ) &&
+          (double)_invalidValues[i]/_numRows > 0.2 ) {
+        _enums[i] = null;
+        _max[i] = _min[i] = 0;
+        _scale[i] = 0;
+        _bases[i] = 0;
+        _colTypes[i] = STRINGCOL;
+        continue;
+      }
+
       switch(_colTypes[i]){
       case UCOL: // only missing values
         _colTypes[i] = BYTE;
@@ -706,6 +721,8 @@ public final class DParseTask extends MRTask {
       default: throw H2O.unimpl();
       }
     }
+
+    _invalidValues = null;
   }
 
   /** Advances to new line. In phase two it also must make sure that the
