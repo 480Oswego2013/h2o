@@ -25,14 +25,15 @@ def glm_R_and_compare(csvPathname, family, formula, y, header=False, h2oResults=
     # FIX! where do the GLM warnings come from
     warningsR = []
     interceptR = coef[0]
-    cListR = coef[1:]
+    # NEW: why did I have to chop off the end of the R list?
+    cListR = coef[1:-1]
 
     if h2oResults is not None: # create delta list
-        (warningsH2o, cListH2o, interceptH2o) = h2oResults
-        interceptDelta = abs(abs(interceptH2o) - abs(interceptR))
-        cDelta = [abs(abs(a) - abs(b)) for a,b in zip(cListH2o, cListR)]
+        (warningsH2O, cListH2O, interceptH2O) = h2oResults
+        interceptDelta = abs(abs(interceptH2O) - abs(interceptR))
+        cDelta = [abs(abs(a) - abs(b)) for a,b in zip(cListH2O, cListR)]
     else:
-        (warningsH2o, cListH2o, interceptH2o) = (None, None, None)
+        (warningsH2O, cListH2O, interceptH2O) = (None, None, None)
         interceptDelta = None
         cDelta = [None for a in cListR]
 
@@ -42,13 +43,13 @@ def glm_R_and_compare(csvPathname, family, formula, y, header=False, h2oResults=
 
     print
     printit("intercept", "", interceptR, interceptDelta)
+    print "compare lengths cListH2O, cListR, cDelta:", len(cListH2O), len(cListR), len(cDelta)
+    print "clistH2O:", cListH2O
+    print "clistR:", cListR
+    print "cn:", cn
+    print "cDelta:", cDelta
     for i,cValue in enumerate(cListR):
-        # skip over the output col name
-        if i>=y: 
-            cnIndex = i+1
-        else:
-            cnIndex = i
-        printit("coefficient", cn[cnIndex], cValue, cDelta[i])
+        printit("coefficient", cn[i], cValue, cDelta[i])
 
     ### print "\nDumping some raw R results (info already printed above)"
     ### print "coef:", ro.r.coef(fit)
@@ -120,17 +121,18 @@ class Basic(unittest.TestCase):
         if (1==1):
             csvFilenameList = [
                 # col is zero based
+                # FIX! what's wrong here? index error
                 ('uis.dat', 'binomial', 8, 5, False),
                 # ('cgd.dat', 'gaussian', 12, 5, False),
+                # ('meexp.dat', 'gaussian', 3, 10, None),
                 ('pros.dat', 'binomial', 1, 10, False),
                 ('chdage.dat', 'binomial', 2, 5, True),
                 ('icu.dat', 'binomial', 1, 10, False),
                 # how to ignore 6? '1,2,3,4,5', False),
-                # ('clslowbwt.dat', 'binomial', 7, 10, False),
+                ('clslowbwt.dat', 'binomial', 7, 10, False),
             ]
         else:
             csvFilenameList = [
-
                 # leave out ID and birth weight
                 ('icu.dat', 'binomial', 1, 10, None),
                 # need to exclude col 0 (ID) and col 10 (bwt)
@@ -139,6 +141,7 @@ class Basic(unittest.TestCase):
                 ('lowbwt.dat', 'binomial', 1, 10, '2,3,4,5,6,7,8,9'),
                 ('lowbwtm11.dat', 'binomial', 1, 10, None),
                 ('meexp.dat', 'gaussian', 3, 10, None),
+                # FIX! does this one hang in R?
                 ('nhanes3.dat', 'binomial', 15, 10, None),
                 ('pbc.dat', 'gaussian', 1, 10, None),
                 ('pharynx.dat', 'gaussian', 12, 10, None),

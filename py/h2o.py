@@ -55,7 +55,7 @@ browse_disable = True
 browse_json = False
 verbose = False
 ipaddr = None
-config_json = False
+config_json = None
 debugger = False
 random_udp_drop = False
 
@@ -269,6 +269,15 @@ def check_port_group(baseport):
             p3 = Popen(command3Split, stdin=p2.stdout, stdout=PIPE)
             output = p3.communicate()[0]
             print output
+
+def decide_if_localhost():
+    if config_json:
+        print "config_json:", config_json
+        return False
+    if 'hosts' in os.getcwd():
+        print "Will use the username's config json"
+        return False
+    return True
 
 # node_count is per host if hosts is specified.
 def build_cloud(node_count=2, base_port=54321, hosts=None, 
@@ -648,7 +657,6 @@ class H2O(object):
             # UPDATE: 1/24/13 change to always wait before the first poll..
             # see if it makes a diff to our low rate fails
             time.sleep(retryDelaySecs)
-
             # every other one?
             create_noise = noise is not None and ((count%2)==0)
             if create_noise:
@@ -746,7 +754,7 @@ class H2O(object):
         # noise is a 2-tuple ("StoreView, none) for url plus args for doing during poll to create noise
         # no noise if None
         a = self.poll_url(a['response'],
-            timeoutSecs=timeoutSecs, retryDelaySecs=0.5, initialDelaySecs=initialDelaySecs, noise=noise)
+            timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs, initialDelaySecs=initialDelaySecs, noise=noise)
 
         verboseprint("\nParse result:", dump_json(a))
         return a
@@ -1054,6 +1062,7 @@ class H2O(object):
         if self.java_heap_GB is not None:
             if (1 > self.java_heap_GB > 63):
                 raise Exception('java_heap_GB <1 or >63  (GB): %s' % (self.java_heap_GB))
+            args += [ '-Xms%dG' % self.java_heap_GB ]
             args += [ '-Xmx%dG' % self.java_heap_GB ]
 
         if self.java_extra_args is not None:
