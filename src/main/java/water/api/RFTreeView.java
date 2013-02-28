@@ -52,7 +52,7 @@ public class RFTreeView extends Request {
 
     res.addProperty(TREE_DEPTH, depth);
     res.addProperty(TREE_LEAVES, leaves);
-    res.add("tree", renderer.json());
+    res.add("tree", renderer.json().getAsJsonObject().get("value"));
 
     Response r = Response.done(res);
     r.addHeader("<h2>Tree " + tree + "</h2>" + graph + code);
