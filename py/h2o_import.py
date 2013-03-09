@@ -1,4 +1,5 @@
 import h2o, h2o_cmd
+import time
 
 def setupImportS3(node=None, path='test-s3-integration'):
     if not node: node = h2o.nodes[0]
@@ -32,12 +33,12 @@ def parseImportS3File(node=None,
 def setupImportFolder(node=None, path='/home/0xdiag/datasets'):
     if not node: node = h2o.nodes[0]
     importFolderResult = node.import_files(path)
-    h2o.dump_json(importFolderResult)
+    ### h2o.dump_json(importFolderResult)
     return importFolderResult
 
 # assumes you call setupImportFolder first
 def parseImportFolderFile(node=None, csvFilename=None, path=None, key2=None,
-    timeoutSecs=30, retryDelaySecs=0.5, initialDelaySecs=1):
+    timeoutSecs=30, retryDelaySecs=0.5, initialDelaySecs=1, pollTimeoutSecs=15):
     if not node: node = h2o.nodes[0]
     if not csvFilename: raise Exception('parseImportFolderFile: No csvFilename')
 
@@ -52,7 +53,11 @@ def parseImportFolderFile(node=None, csvFilename=None, path=None, key2=None,
         myKey2 = key2
 
     print "Waiting for the slow parse of the file:", csvFilename
-    parseKey = node.parse(csvPathnameForH2O, myKey2, timeoutSecs, retryDelaySecs, initialDelaySecs)
+    # we're getting a http timeout on the parse progress poll of big parses. 
+    # try to increase timeout with pollTimeoutSecs.
+    # don't want it big normally..don't want to wait after fail for simple tests.
+    parseKey = node.parse(csvPathnameForH2O, myKey2, 
+        timeoutSecs, retryDelaySecs, initialDelaySecs, pollTimeoutSecs)
     print "\nParse result:", parseKey
     return parseKey
 

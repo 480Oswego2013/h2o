@@ -40,6 +40,7 @@ class parse_rand_schmoo(unittest.TestCase):
         if (localhost):
             h2o.build_cloud(2,java_heap_GB=4,use_flatfile=True)
         else:
+            import h2o_hosts
             h2o_hosts.build_cloud_with_hosts()
         h2b.browseTheCloud()
 
@@ -69,7 +70,7 @@ class parse_rand_schmoo(unittest.TestCase):
 
         print "This is the same format/data file used by test_same_parse, but the non-gzed version"
         print "\nSchmoo the # of rows"
-        for trial in range (20):
+        for trial in range (500):
 
             rowData = rand_rowData()
             num = random.randint(4096, 10096)
@@ -80,7 +81,7 @@ class parse_rand_schmoo(unittest.TestCase):
             key = csvFilename + "_" + str(trial)
             key2 = csvFilename + "_" + str(trial) + ".hex"
             key = h2o_cmd.parseFile(csvPathname=csvPathname, key=key, key2=key2, timeoutSecs=15)
-            print "trial #", trial, "parse end on ", csvFilename, \
+            print "trial #", trial, "with num rows:", num, "parse end on ", csvFilename, \
                 'took', time.time() - start, 'seconds'
             ### h2o_cmd.runInspect(key=key2)
             ### h2b.browseJsonHistoryAsUrlLastMatch("Inspect")

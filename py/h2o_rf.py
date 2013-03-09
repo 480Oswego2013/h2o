@@ -1,5 +1,7 @@
 import h2o
+import h2o_cmd
 import random
+import time
 
 def pickRandRfParams(paramDict, params):
     colX = 0
@@ -16,7 +18,7 @@ def pickRandRfParams(paramDict, params):
             params['out_of_bag_error_estimate'] = 0
     return colX
 
-def simpleCheckRFView(node, rfv,**kwargs):
+def simpleCheckRFView(node, rfv, **kwargs):
     if not node:
         node = h2o.nodes[0]
 
@@ -35,6 +37,25 @@ def simpleCheckRFView(node, rfv,**kwargs):
     # the simple assigns will at least check the key exists
     cm = rfv['confusion_matrix']
     header = cm['header'] # list
+
+    classification_error = cm['classification_error']
+    print "classification_error:", classification_error
+
+    rows_skipped = cm['rows_skipped']
+    print "rows_skipped:", rows_skipped
+
+    cm_type = cm['type']
+    print "type:", cm_type
+
+    used_trees = cm['used_trees']
+    ### print "used_trees:", used_trees
+    if (used_trees <= 0):
+        raise Exception("used_trees should be >0. used_trees:", used_trees)
+
+    # if we got the ntree for comparison. Not always there in kwargs though!
+    ntree = kwargs.get('ntree',None)
+    if (ntree is not None and used_trees != ntree):
+        raise Exception("used_trees should == ntree. used_trees:", used_trees)
 
     scoresList = cm['scores'] # list
     totalScores = 0
@@ -84,5 +105,68 @@ def simpleCheckRFView(node, rfv,**kwargs):
     ### modelInspect = node.inspect(model_key)
     dataInspect = node.inspect(data_key)
 
+    return classification_error
 
+def trainRF(trainParseKey, **kwargs):
+    # Train RF
+    start = time.time()
+    trainResult = h2o_cmd.runRFOnly(parseKey=trainParseKey, **kwargs)
+    rftime      = time.time()-start 
+    h2o.verboseprint("RF train results: ", trainResult)
+    h2o.verboseprint("RF computation took {0} sec".format(rftime))
+
+    trainResult['python_call_timer'] = rftime
+    return trainResult
+
+def scoreRF(scoreParseKey, trainResult, **kwargs):
+    # Run validation on dataset
+    rfModelKey  = trainResult['model_key']
+    ntree       = trainResult['ntree']
+    
+    start = time.time()
+    scoreResult = h2o_cmd.runRFView(modelKey=rfModelKey, parseKey=scoreParseKey, ntree=ntree, **kwargs)
+    rftime      = time.time()-start 
+    h2o.verboseprint("RF score results: ", scoreResult)
+    h2o.verboseprint("RF computation took {0} sec".format(rftime))
+
+    scoreResult['python_call_timer'] = rftime
+    return scoreResult
+
+def pp_rf_result(rf):
+    jcm = rf['confusion_matrix']
+    header = jcm['header']
+    cm = ' '.join(header)
+    c = 0
+    for line in jcm['scores']:
+        lineSum  = sum(line)
+        errorSum = lineSum - line[c]
+        if (lineSum>0): 
+            err = float(errorSum) / lineSum
+        else:
+            err = 0.0
+        cm = "{0}\n {1} {2} {3}".format(cm, header[c], ' '.join(map(str,line)), err)
+        c += 1
+
+    return """
+ Leaves: {0} / {1} / {2}
+  Depth: {3} / {4} / {5}
+   mtry: {6}
+   Type: {7}
+    Err: {8} %
+   Time: {9} seconds
+
+   Confusion matrix:
+      {10}
+""".format(
+        rf['trees']['leaves']['min'],
+        rf['trees']['leaves']['mean'],
+        rf['trees']['leaves']['max'],
+        rf['trees']['depth']['min'],
+        rf['trees']['depth']['mean'],
+        rf['trees']['depth']['max'],
+        rf['mtry'], 
+        rf['confusion_matrix']['type'],
+        rf['confusion_matrix']['classification_error'] *100,
+        rf['response']['time'],
+        cm)
 
