@@ -1,4 +1,5 @@
 package water;
+
 import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
@@ -6,17 +7,15 @@ import java.nio.channels.DatagramChannel;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
-import jsr166y.ForkJoinPool;
-import jsr166y.ForkJoinWorkerThread;
+import jsr166y.*;
 import water.exec.Function;
 import water.hdfs.HdfsLoader;
 import water.nbhm.NonBlockingHashMap;
 import water.store.s3.PersistS3;
 import water.util.Utils;
-import H2OInit.Boot;
 
-
-import com.google.common.base.Strings;
+import com.amazonaws.auth.PropertiesCredentials;
+import com.google.common.base.Objects;
 import com.google.common.io.Closeables;
 
 /**
@@ -55,9 +54,26 @@ public final class H2O {
 
   public static final PrintStream OUT = System.out;
   public static final PrintStream ERR = System.err;
+  static final int NUMCPUS = Runtime.getRuntime().availableProcessors();
 
   // Convenience error
   public static final RuntimeException unimpl() { return new RuntimeException("unimplemented"); }
+
+  // Central /dev/null for ignored exceptions
+  public static final void ignore(Throwable e)             { ignore(e,"[h2o] Problem ignored: "); }
+  public static final void ignore(Throwable e, String msg) { ignore(e, msg, true); }
+  public static final void ignore(Throwable e, String msg, boolean printException) {
+    StringBuffer sb = new StringBuffer();
+    sb.append(msg).append('\n');
+    if (printException) {
+      StackTraceElement[] stack = e.getStackTrace();
+      // The replacement of Exception -> Problem is required by our testing framework which would report
+      // error if it sees "exception" in the node output
+      sb.append(e.toString().replace("Exception", "Problem")).append('\n');
+      for (StackTraceElement el : stack) { sb.append("\tat "); sb.append(el.toString().replace("Exception", "Problem" )); sb.append('\n'); }
+    }
+    System.err.println(sb);
+  }
 
   // --------------------------------------------------------------------------
   // The Current Cloud. A list of all the Nodes in the Cloud. Changes if we
@@ -230,14 +246,14 @@ public final class H2O {
   }
 
   private static InetAddress guessInetAddress(List<InetAddress> ips) {
-    System.err.println("Multiple local IPs detected:");
-    for(InetAddress ip : ips) System.err.println("  " + ip);
-    System.err.println("Attempting to determine correct address...");
+    System.out.println("Multiple local IPs detected:");
+    for(InetAddress ip : ips) System.out.println("  " + ip);
+    System.out.println("Attempting to determine correct address...");
     Socket s = null;
     try {
       // using google's DNS server as an external IP to find
       s = new Socket("8.8.8.8", 53);
-      System.err.println("Using " + s.getLocalAddress());
+      System.out.println("Using " + s.getLocalAddress());
       return s.getLocalAddress();
     } catch( Throwable t ) {
       return null;
@@ -337,35 +353,128 @@ public final class H2O {
 
 
   // --------------------------------------------------------------------------
-  // The main Fork/Join worker pool(s).
+  // The worker pools - F/J pools with different priorities.
+
+  // These priorities are carefully ordered and asserted for... modify with
+  // care.  The real problem here is that we can get into cyclic deadlock
+  // unless we spawn a thread of priority "X+1" in order to allow progress
+  // on a queue which might be flooded with a large number of "<=X" tasks.
+  //
+  // Example of deadlock: suppose TaskPutKey and the Invalidate ran at the same
+  // priority on a 2-node cluster.  Both nodes flood their own queues with
+  // writes to unique keys, which require invalidates to run on the other node.
+  // Suppose the flooding depth exceeds the thread-limit (e.g. 99); then each
+  // node might have all 99 worker threads blocked in TaskPutKey, awaiting
+  // remote invalidates - but the other nodes' threads are also all blocked
+  // awaiting invalidates!
+  //
+  // We fix this by being willing to always spawn a thread working on jobs at
+  // priority X+1, and guaranteeing there are no jobs above MAX_PRIORITY -
+  // i.e., jobs running at MAX_PRIORITY cannot block, and when those jobs are
+  // done, the next lower level jobs get unblocked, etc.
+  public static final byte        MAX_PRIORITY = Byte.MAX_VALUE-1;
+  public static final byte    ACK_ACK_PRIORITY = MAX_PRIORITY-0;
+  public static final byte        ACK_PRIORITY = MAX_PRIORITY-1;
+  public static final byte   DESERIAL_PRIORITY = MAX_PRIORITY-2;
+  public static final byte INVALIDATE_PRIORITY = MAX_PRIORITY-2;
+  public static final byte    ARY_KEY_PRIORITY = MAX_PRIORITY-2;
+  public static final byte    GET_KEY_PRIORITY = MAX_PRIORITY-3;
+  public static final byte    PUT_KEY_PRIORITY = MAX_PRIORITY-4;
+  public static final byte     ATOMIC_PRIORITY = MAX_PRIORITY-5;
+  public static final byte     MIN_HI_PRIORITY = MAX_PRIORITY-5;
+  public static final byte        MIN_PRIORITY = 0;
+
+  // F/J threads that remember the priority of the last task they started
+  // working on.
   static class FJWThr extends ForkJoinWorkerThread {
-    FJWThr(ForkJoinPool pool, int priority) {
-      super(pool);
-      setPriority(priority);
-    }
+    public int _priority;
+    FJWThr(ForkJoinPool pool) { super(pool); }
   }
+  // Factory for F/J threads, with cap's that vary with priority.
   static class FJWThrFact implements ForkJoinPool.ForkJoinWorkerThreadFactory {
-    final int _priority;
-    FJWThrFact( int priority ) { _priority = priority; }
+    private final int _cap;
+    FJWThrFact( int cap ) { _cap = cap; }
     public ForkJoinWorkerThread newThread(ForkJoinPool pool) {
-      // The "Normal" or "Low" priority work queues get capped at 99 threads
-      // blocked on I/O. I/O work *should* be done by HI priority threads on
-      // other nodes - so hopefully this will not lead to deadlock. Capping
-      // all thread pools definitely does lead to deadlock.
-      return (_priority > Thread.MIN_PRIORITY || pool.getPoolSize() < 100)
-        ? new FJWThr(pool,_priority) : null;
+      return pool.getPoolSize() <= _cap ? new FJWThr(pool) : null;
     }
   }
-  // Hi-priority work is things that block other things, eg. TaskGetKey, and
-  // typically does I/O.
-  public static final ForkJoinPool FJP_HI =
-    new ForkJoinPool(Runtime.getRuntime().availableProcessors(),
-                     new FJWThrFact(Thread.MAX_PRIORITY-2), null, false);
+
+  // A standard FJ Pool, with an expected priority level.
+  private static class ForkJoinPool2 extends ForkJoinPool {
+    public final int _priority;
+    ForkJoinPool2(int p, int cap) { super(NUMCPUS,new FJWThrFact(cap),null,false); _priority = p; }
+    public H2OCountedCompleter poll() { return (H2OCountedCompleter)pollSubmission(); }
+  }
 
   // Normal-priority work is generally directly-requested user ops.
-  public static final ForkJoinPool FJP_NORM =
-    new ForkJoinPool(Runtime.getRuntime().availableProcessors(),
-                     new FJWThrFact(Thread.MIN_PRIORITY), null, false);
+  private static final ForkJoinPool2 FJP_NORM = new ForkJoinPool2(MIN_PRIORITY,99);
+  // Hi-priority work, sorted into individual queues per-priority.
+  // Capped at a small number of threads per pool.
+  private static final ForkJoinPool2 FJPS[] = new ForkJoinPool2[MAX_PRIORITY+1];
+  static {
+    for( int i=MIN_HI_PRIORITY; i<=MAX_PRIORITY; i++ )
+      FJPS[i] = new ForkJoinPool2(i,NUMCPUS); // 1 thread per pool
+    FJPS[0] = FJP_NORM;
+  }
+
+  // Easy peeks at the low FJ queue
+  public static int getLoQueue (     ) { return FJP_NORM.getQueuedSubmissionCount();}
+  public static int loQPoolSize(     ) { return FJP_NORM.getPoolSize();             }
+  public static int getHiQueue (int i) { return FJPS[i+MIN_HI_PRIORITY].getQueuedSubmissionCount();}
+  public static int hiQPoolSize(int i) { return FJPS[i+MIN_HI_PRIORITY].getPoolSize();             }
+
+  // Submit to the correct priority queue
+  public static void submitTask( H2OCountedCompleter task ) {
+    int priority = task.priority();
+    assert MIN_PRIORITY <= priority && priority <= MAX_PRIORITY;
+    FJPS[priority].submit(task);
+  }
+
+  // Simple wrapper over F/J CountedCompleter to support priority queues.  F/J
+  // queues are simple unordered (and extremely light weight) queues.  However,
+  // we frequently need priorities to avoid deadlock and to promote efficient
+  // throughput (e.g. failure to respond quickly to TaskGetKey can block an
+  // entire node for lack of some small piece of data).  So each attempt to do
+  // lower-priority F/J work starts with an attempt to work & drain the
+  // higher-priority queues.
+  public static abstract class H2OCountedCompleter extends CountedCompleter {
+    // Once per F/J task, drain the high priority queue before doing any low
+    // priority work.
+    @Override public final void compute() {
+      FJWThr t = (FJWThr)Thread.currentThread();
+      int pp = ((ForkJoinPool2)t.getPool())._priority;
+      assert  priority() == pp; // Job went to the correct queue?
+      assert t._priority <= pp; // Thread attempting the job is only a low-priority?
+      // Drain the high priority queues before the normal F/J queue
+      try {
+        for( int p = MAX_PRIORITY; p > pp; p-- ) {
+          if( FJPS[p] == null ) break;
+          H2OCountedCompleter h2o = FJPS[p].poll();
+          if( h2o != null ) {     // Got a hi-priority job?
+            t._priority = p;      // Set & do it now!
+            h2o.compute2();       // Do it ahead of normal F/J work
+            p++;                  // Check again the same queue
+          }
+        }
+      } finally {
+        t._priority = pp;
+      }
+      // Now run the task as planned
+      compute2();
+    }
+    // Do the actually intended work
+    public abstract void compute2();
+    // In order to prevent deadlock, threads that block waiting for a reply
+    // from a remote node, need the remote task to run at a higher priority
+    // than themselves.  This field tracks the required priority.
+    public byte priority() { return MIN_PRIORITY; }
+    // Do not silently ignore uncaught exceptions!
+    public boolean onExceptionalCompletion( Throwable ex, CountedCompleter caller ) {
+      ex.printStackTrace();
+      return true;
+    }
+  }
+
 
   // --------------------------------------------------------------------------
   public static OptArgs OPT_ARGS = new OptArgs();
@@ -382,7 +491,7 @@ public final class H2O {
     public String keepice; // Do not delete ice on startup
     public String soft = null; // soft launch for demos
     public String random_udp_drop = null; // test only, randomly drop udp incoming
-    public String log_headers = null; // add machine name, PID and time to logs
+    public String log = null; // add machine name, PID and time to logs
   }
   public static boolean IS_SYSTEM_RUNNING = false;
 
@@ -398,7 +507,7 @@ public final class H2O {
     arguments.extract(OPT_ARGS);
     ARGS = arguments.toStringArray();
 
-    if(OPT_ARGS.log_headers != null)
+    if(OPT_ARGS.log != null)
       Log.initHeaders();
 
     startLocalNode(); // start the local node
@@ -415,6 +524,13 @@ public final class H2O {
 
   private static void initializeExpressionEvaluation() {
     Function.initializeCommonFunctions();
+  }
+
+  // Default location of the AWS credentials file
+  private static final String DEFAULT_CREDENTIALS_LOCATION = "AwsCredentials.properties";
+  public static PropertiesCredentials getAWSCredentials() throws IOException {
+    File credentials = new File(Objects.firstNonNull(OPT_ARGS.aws_credentials, DEFAULT_CREDENTIALS_LOCATION));
+    return new PropertiesCredentials(credentials);
   }
 
   /** Starts the local k-v store.
@@ -481,6 +597,7 @@ public final class H2O {
     // which we have not recieved a timely response and probably need to
     // arrange for a re-send to cover a dropped UDP packet.
     new UDPTimeOutThread().start();
+    new H2ONode.AckAckTimeOutThread().start();
 
     // Start the TCPReceiverThread, to listen for TCP requests from other Cloud
     // Nodes. There should be only 1 of these, and it never shuts down.
@@ -655,6 +772,17 @@ public final class H2O {
     File f = new File(fname);
     if( !f.exists() ) return null; // No flat file
     HashSet<H2ONode> h2os = new HashSet<H2ONode>();
+    List<FlatFileEntry> list = parseFlatFile(f);
+    for(FlatFileEntry entry : list)
+      h2os.add(H2ONode.intern(entry.inet, entry.port+1));// use the UDP port here
+    return h2os;
+  }
+  public static class FlatFileEntry {
+    public InetAddress inet;
+    public int port;
+  }
+  public static List<FlatFileEntry> parseFlatFile( File f ) {
+    List<FlatFileEntry> list = new ArrayList<FlatFileEntry>();
     BufferedReader br = null;
     int port = DEFAULT_PORT;
     try {
@@ -692,11 +820,14 @@ public final class H2O {
             Log.die("Invalid port #: "+portStr);
           }
         }
-        h2os.add(H2ONode.intern(inet, port+1));// use the UDP port here
+        FlatFileEntry entry = new FlatFileEntry();
+        entry.inet = inet;
+        entry.port = port;
+        list.add(entry);
       }
     } catch( Exception e ) { Log.die(e.toString()); }
     finally { Closeables.closeQuietly(br); }
-    return h2os;
+    return list;
   }
 
   static void initializePersistence() {
@@ -735,6 +866,8 @@ public final class H2O {
     // Turn on to see copious cache-cleaning stats
     static public final boolean VERBOSE = Boolean.getBoolean("h2o.cleaner.verbose");
 
+    boolean _diskFull = false;
+
     public Cleaner() {
       super("Memory Cleaner");
       setDaemon(true);
@@ -746,7 +879,15 @@ public final class H2O {
       MemoryManager.set_goals("init",false);
     }
 
+    static boolean lazyPersist(){ // free disk > our DRAM?
+      return H2O.SELF._heartbeat.get_free_disk() > MemoryManager.MEM_MAX;
+    }
+    static boolean isDiskFull(){ // free disk space < 5K?
+      File f = new File(PersistIce.ROOT);
+      return f.getUsableSpace() < (5 << 10);
+    }
     public void run() {
+      boolean diskFull = false;
       while (true) {
         // Sweep the K/V store, writing out Values (cleaning) and free'ing
         // - Clean all "old" values (lazily, optimistically)
@@ -778,6 +919,8 @@ public final class H2O {
         // If lazy, store-to-disk things down to 1/2 the desired cache level
         // and anything older than 5 secs.
         boolean force = (h._cached >= DESIRED); // Forced to clean
+        if(force && diskFull)
+          diskFull = isDiskFull();
         long clean_to_age = h.clean_to(force ? DESIRED : (DESIRED>>1));
         // If not forced cleaning, expand the cleaning age to allows Values
         // more than 5sec old
@@ -791,6 +934,7 @@ public final class H2O {
         // For faster K/V store walking get the NBHM raw backing array,
         // and walk it directly.
         Object[] kvs = STORE.raw_array();
+
         // Start the walk at slot 2, because slots 0,1 hold meta-data
         for( int i=2; i<kvs.length; i += 2 ) {
           // In the raw backing array, Keys and Values alternate in slots
@@ -799,14 +943,14 @@ public final class H2O {
           Key key = (Key )ok;
           if( !(ov instanceof Value) ) continue; // Ignore tombstones and Primes and null's
           Value val = (Value)ov;
-          byte[] m = val.mem();
+          byte[] m = val.rawMem();
           if( m == null ) continue; // Nothing to throw out
 
           // ValueArrays covering large files in global filesystems such as NFS
           // or HDFS are only made on import (right now), and not reconstructed
           // by inspection of the Key or filesystem.... so we cannot toss them
           // out because they will not be reconstructed merely by loading the Value.
-          if( val._isArray != 0 &&
+          if( val.isArray() &&
               (val._persist & Value.BACKEND_MASK)!=Value.ICE )
             continue; // Cannot throw out
 
@@ -820,11 +964,24 @@ public final class H2O {
 
           // Should I write this value out to disk?
           // Should I further force it from memory?
-          if( force || lazy_clean(key) ) {
-            if( VERBOSE && !val.isPersisted() ) { System.out.print('.'); cleaned += m.length; }
-            val.storePersist(); // Write to disk
-            if( force ) val.freeMem(); // And, under pressure, free mem
-            if( VERBOSE ) freed += m.length;
+          if(!val.isPersisted() && !diskFull && (force || (lazyPersist() && lazy_clean(key)))) {
+            if( VERBOSE) { System.out.print('.'); cleaned += m.length; }
+            try{
+              val.storePersist(); // Write to disk
+            } catch(IOException e) {
+              if( isDiskFull() ) // disk full?
+                System.err.println("Disk full! Disabling swapping to disk." + ((force)?" Memory low! Please free some space in " + PersistIce.ROOT+"!":""));
+              else
+                System.err.println("Disk swapping failed! " + e.getMessage());
+              // Something is wrong so mark disk as full anyways so we do not
+              // attempt to write again.  (will retry next run when memory is
+              // low)
+              diskFull = true;
+            }
+          }
+          if(force && val.isPersisted()){
+            val.freeMem(); // And, under pressure, free mem
+            freed += m.length;
           }
         }
 
@@ -846,7 +1003,6 @@ public final class H2O {
       Key arykey = ValueArray.getArrayKey(key);
       return arykey.user_allowed(); // Write user keys but not system keys
     }
-
 
     // Histogram class
     public static class Histo {
@@ -902,9 +1058,9 @@ public final class H2O {
           if( !(ok instanceof Key ) ) continue; // Ignore tombstones and Primes and null's
           if( !(ov instanceof Value) ) continue; // Ignore tombstones and Primes and null's
           Value val = (Value)ov;
-          byte[] m = val.mem();
+          byte[] m = val.rawMem();
           if( m == null ) continue;
-          if( val._isArray != 0 &&
+          if( val.isArray() &&
               (val._persist & Value.BACKEND_MASK)!=Value.ICE )
             continue; // Cannot throw out
 

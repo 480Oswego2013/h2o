@@ -1,11 +1,7 @@
 package water.hdfs;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.util.ArrayList;
 import water.*;
-import water.hdfs.PersistHdfs;
+import water.DTask;
 
 /**
  * Distributed task to store key on HDFS.
@@ -28,13 +24,13 @@ public class TaskStore2HDFS extends DTask<TaskStore2HDFS> {
     assert PersistHdfs.getPathForKey(srcKey) != null; // Validate key name
     Value v = DKV.get(srcKey);
     if( v == null ) return "Key "+srcKey+" not found";
-    if( v._isArray == 0 ) {     // Simple chunk?
+    if( !v.isArray() ) {        // Simple chunk?
       v.setHdfs();              // Set to HDFS and be done
       return null;              // Success
     }
 
     // For ValueArrays, make the .hex header
-    ValueArray ary = ValueArray.value(v);
+    ValueArray ary = v.get();
     String err = PersistHdfs.freeze(srcKey,ary);
     if( err != null ) return err;
 
@@ -50,7 +46,7 @@ public class TaskStore2HDFS extends DTask<TaskStore2HDFS> {
 
     // Watch the progress key until it gets removed or an error appears
     long idx = 0;
-    while( UKV.get(selfKey,ts) != null ) {
+    while( (ts=UKV.get(selfKey,TaskStore2HDFS.class)) != null ) {
       if( ts._indexFrom != idx ) {
         System.out.print(" "+idx+"/"+ary.chunks());
         idx = ts._indexFrom;
@@ -76,9 +72,9 @@ public class TaskStore2HDFS extends DTask<TaskStore2HDFS> {
   }
 
   @Override
-  public void compute() {
+  public void compute2() {
     String path = null;// getPathFromValue(val);
-    ValueArray ary = ValueArray.value(_arykey);
+    ValueArray ary = DKV.get(_arykey).get();
     Key self = selfKey();
 
     while( _indexFrom < ary.chunks() ) {

@@ -22,10 +22,14 @@ public abstract class DKV {
       if( res == old ) return old; // PUT is globally visible now?
     }
   }
+  static public Value put( Key key, Iced v ) { return put(key,v,null); }
+  static public Value put( Key key, Iced v, Futures fs ) { 
+    return put(key,new Value(key,v),fs); 
+  }
 
   // Remove this Key
   static public Value remove( Key key ) { return remove(key,null); }
-  static public Value remove( Key key, Futures fs ) { return put(key,null,fs); }
+  static public Value remove( Key key, Futures fs ) { return put(key,(Value)null,fs); }
 
   // Do a PUT, and on success trigger replication.  Some callers need the old
   // value, and some callers need the Futures so we can block later to ensure
@@ -72,24 +76,23 @@ public abstract class DKV {
   // Stall until all existing writes have completed.
   // Used to order successive writes.
   static public void write_barrier() {
-    for( RPC rpc : RPC.TASKS.values() )
-      if( rpc._dt instanceof TaskPutKey || rpc._dt instanceof Atomic )
-        rpc.get();
+    for( H2ONode h2o : H2O.CLOUD._memary )
+      for( RPC rpc : h2o.tasks() )
+        if( rpc._dt instanceof TaskPutKey || rpc._dt instanceof Atomic )
+          rpc.get();
   }
 
   // User-Weak-Get a Key from the distributed cloud.
-  static public Value get( Key key, int len ) {
+  static public Value get( Key key, int len, int priority ) {
     while( true ) {
       // Read the Cloud once per put-attempt, to keep a consistent snapshot.
       H2O cloud = H2O.CLOUD;
       Value val = H2O.get(key);
       // Hit in local cache?
       if( val != null ) {
-        // See if we have enough data cached locally
-        if( len > val._max ) len = val._max;
-        if( len == 0 || val.mem() != null || val.isPersisted() )
-          return val; // Got it on local disk?  Then we must have it all
-        // Got something, but not enough and not on local disk: need to read more
+        if( len > val._max ) len = val._max; // See if we have enough data cached locally
+        assert len == 0 || val.rawMem() != null || val.rawPOJO() != null || val.isPersisted();
+        return val;
       }
 
       // While in theory we could read from any replica, we always need to
@@ -107,16 +110,17 @@ public abstract class DKV {
       // e.g., because a prior 'put' of a null (i.e. a remove) is still mid-
       // send to the remote, so the local get has missed above, but a remote
       // get still might 'win' because the remote 'remove' is still in-progress.
-      for( RPC<?> rpc : RPC.TASKS.values() )
-        if( rpc._target == home && rpc._dt instanceof TaskPutKey ) {
+      for( RPC<?> rpc : home.tasks() )
+        if( rpc._dt instanceof TaskPutKey ) {
+          assert rpc._target == home;
           TaskPutKey tpk = (TaskPutKey)rpc._dt;
           Key k = tpk._key;
           if( k != null && key.equals(k) )
             return tpk._xval;
         }
 
-      return TaskGetKey.get(home,key);
+      return TaskGetKey.get(home,key,priority);
     }
   }
-  static public Value get( Key key ) { return get(key,Integer.MAX_VALUE); }
+  static public Value get( Key key ) { return get(key,Integer.MAX_VALUE,H2O.GET_KEY_PRIORITY); }
 }

@@ -5,11 +5,9 @@ import static org.junit.Assert.assertEquals;
 import hex.rf.DRF.DRFFuture;
 import hex.rf.Tree.StatType;
 
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.*;
 
 import water.*;
-import water.util.TestUtil;
 
 /**
  * Note: This test expect cloud of 3 nodes.
@@ -27,7 +25,7 @@ public class RFPredDomainTest extends TestUtil {
   static void runIrisRF(final String trainDS, final String testDS, double expTestErr, long[][] expCM, String[] expDomain) throws Exception {
     String trainKeyName = "iris_train.hex";
     Key trainKey        = loadAndParseKey(trainKeyName, trainDS);
-    ValueArray trainData = ValueArray.value(trainKey);
+    ValueArray trainData = DKV.get(trainKey).get();
 
     int  trees    = 10;
     int  depth    = 50;
@@ -38,17 +36,15 @@ public class RFPredDomainTest extends TestUtil {
     // Start the distributed Random Forest
     String modelName   = "model";
     final Key modelKey = Key.make(modelName);
-    DRFFuture drf = hex.rf.DRF.execute(modelKey,cols,trainData,trees,depth,1.0f,(short)1024,statType,seed,false, null, -1, false, null, 0, 0);
+    DRFFuture drf = hex.rf.DRF.execute(modelKey,cols,trainData,trees,depth,1024,statType,seed,false, null, -1, Sampling.Strategy.RANDOM, 1.0f, null, 0, 0);
     // Block
     drf.get();
 
-    RFModel model = UKV.get(modelKey, new RFModel());
-System.out.println("RFPredDomainTest.runIrisRF(): " + model);
+    RFModel model = UKV.get(modelKey);
     String testKeyName  = "iris_test.hex";
     // Load validation dataset
     Key testKey         = loadAndParseKey(testKeyName, testDS);
-    ValueArray testData = ValueArray.value(testKey);
-System.out.println("RFPredDomainTest.runIrisRF(): " + testData._key);
+    ValueArray testData = DKV.get(testKey).get();
     Confusion confusion = Confusion.make(model, testData._key, model._features-1, null, false);
     confusion.report();
     assertEquals("Error rate", expTestErr, confusion.classError(), 0.001);
@@ -95,6 +91,7 @@ System.out.println("RFPredDomainTest.runIrisRF(): " + testData._key);
    *   CM   : A B C
    */
   @Test
+  @Ignore
   public void irisMissing() throws Exception {
     long[][] cm = new long[][] {
         a(0, 0,  0),
@@ -138,6 +135,7 @@ System.out.println("RFPredDomainTest.runIrisRF(): " + testData._key);
    *   CM   : [0,4]
    */
   @Test
+  @Ignore
   public void irisNumericExtra() throws Exception {
     long[][] cm = new long[][] {
         a(20, 0,  0,  0, 0),
@@ -213,6 +211,29 @@ System.out.println("RFPredDomainTest.runIrisRF(): " + testData._key);
     String[] cmDomain = new String[] {"-1", "0", "1", "2", "3", "4"};
     runIrisRF("smalldata/test/classifier/iris_train_numeric.csv",
               "smalldata/test/classifier/iris_test_numeric_extra2.csv",
+              0.057f, cm, cmDomain);
+  }
+
+  /**
+   * Scenario:
+   *   model: [0,2]
+   *   data : [-1,4]
+   *   CM   : [-1,4]
+   */
+  @Test
+  @Ignore // ignore for now
+  public void irisExtraWithNAs() throws Exception {
+    long[][] cm = new long[][] {
+        a(0, 0,  0, 1, 0, 0),
+        a(0, 20, 0, 0, 0, 0),
+        a(0, 0, 16, 0, 0, 0),
+        a(0, 0,  1,13, 0, 0),
+        a(0, 0,  0, 0, 0, 0),
+        a(0, 0,  1, 0, 0, 0),
+    };
+    String[] cmDomain = new String[] {"-1", "0", "1", "2", "3", "4"};
+    runIrisRF("smalldata/test/classifier/iris_train.csv",
+              "smalldata/test/classifier/iris_test_extra_with_na.csv",
               0.057f, cm, cmDomain);
   }
 }

@@ -8,8 +8,7 @@ import org.apache.hadoop.fs.Path;
 import water.DKV;
 import water.hdfs.PersistHdfs;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
+import com.google.gson.*;
 import com.google.gson.internal.Streams;
 
 public class ImportHdfs extends Request {
@@ -17,21 +16,11 @@ public class ImportHdfs extends Request {
     public PathArg(String name) {
       super(TypeaheadHdfsPathRequest.class, name, true);
     }
-
-    @Override
-    protected String parse(String input) throws IllegalArgumentException {
+    @Override protected String parse(String input) throws IllegalArgumentException {
       return input;
     }
-
-    @Override
-    protected String queryDescription() {
-      return "existing HDFS path";
-    }
-
-    @Override
-    protected String defaultValue() {
-      return null;
-    }
+    @Override protected String queryDescription() { return "existing HDFS path"; }
+    @Override protected String defaultValue() { return null; }
   }
 
   protected final PathArg _path = new PathArg("path");
@@ -46,8 +35,9 @@ public class ImportHdfs extends Request {
   protected Response serve() {
     JsonArray succ = new JsonArray();
     JsonArray fail = new JsonArray();
+    String pstr = _path.value();
     try {
-      PersistHdfs.addFolder(new Path(_path.value()), succ, fail);
+      PersistHdfs.addFolder(new Path(pstr), succ, fail);
     } catch( IOException e ) {
       StringBuilder sb = new StringBuilder();
       PrintWriter pw = new PrintWriter(Streams.writerForAppendable(sb));
@@ -56,12 +46,17 @@ public class ImportHdfs extends Request {
       return Response.error(sb.toString());
     }
     DKV.write_barrier();
-
     JsonObject json = new JsonObject();
+    json.add(NUM_SUCCEEDED, new JsonPrimitive(succ.size()));
     json.add(SUCCEEDED, succ);
+    json.add(NUM_FAILED, new JsonPrimitive(fail.size()));
     json.add(FAILED, fail);
     Response r = Response.done(json);
     r.setBuilder(SUCCEEDED + "." + KEY, new KeyCellBuilder());
+    // Add quick link
+    if (succ.size() > 1)
+      r.addHeader("<div class='alert'>" //
+          + Parse.link("*"+pstr+"*", "Parse all into hex format") + " </div>");
     return r;
   }
 }

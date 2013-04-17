@@ -144,27 +144,19 @@ public class MultipartUpload extends MRTask {
   }
 
   private static ValueArray va(Value value) {
-    if( value._isArray != 0 ) return ValueArray.value(value);
-    return new ValueArray(value._key, value.length(), Value.S3);
+    if( value.isArray() ) return value.get();
+    return new ValueArray(value._key, value.length());
   }
 
   private static void step(Key key) {
     new TAtomic<Progress>() {
-      @Override
-      public Progress atomic(Progress old) {
+      @Override public Progress atomic(Progress old) {
         Progress update = new Progress();
         update._todo = old._todo;
         update._done = old._done + 1;
-
         if( DEBUG )
           System.out.println("s3 step " + update._done + " of " + update._todo);
-
         return update;
-      }
-
-      @Override
-      public Progress alloc() {
-        return new Progress();
       }
     }.invoke(key);
   }

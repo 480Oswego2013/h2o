@@ -46,11 +46,11 @@ class Basic(unittest.TestCase):
             'y': y,
             'family': 'binomial',
             'link': 'logit',
-            'num_cross_validation_folds': 0,
+            'n_folds': 0,
             'case_mode': '=',
             'case': 1,
             'max_iter': max_iter,
-            'beta_eps': 1e-3}
+            'beta_epsilon': 1e-3}
 
         timeoutSecs = 120
 

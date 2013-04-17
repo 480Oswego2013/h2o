@@ -8,6 +8,9 @@ import water.parser.ValueString;
 
 public class CsvParser extends CustomParser {
 
+  /* Constant to specify that separator is not specified. */
+  public static final byte NO_SEPARATOR = -1;
+
   public final byte CHAR_DECIMAL_SEPARATOR;
   public final byte CHAR_SEPARATOR;
 
@@ -44,7 +47,7 @@ public class CsvParser extends CustomParser {
   DParseTask callback;
 
 
-  public CsvParser(Key aryKey, int numColumns, byte separator, byte decimalSeparator, DParseTask callback, boolean skipFirstLine) throws Exception {
+  public CsvParser(Key aryKey, int numColumns, byte separator, byte decimalSeparator, DParseTask callback, boolean skipFirstLine) {
     _aryKey = aryKey;
     _numColumns = numColumns;
     CHAR_SEPARATOR = separator;
@@ -54,10 +57,10 @@ public class CsvParser extends CustomParser {
   }
 
   @SuppressWarnings("fallthrough")
-  @Override public final void parse(Key key) throws Exception {
-    ValueArray _ary = _aryKey == null ? null : ValueArray.value(DKV.get(_aryKey));
+  @Override public final void parse(Key key) {
+    ValueArray _ary = _aryKey == null ? null : (ValueArray)DKV.get(_aryKey).get();
     ValueString _str = new ValueString();
-    byte[] bits = DKV.get(key).get();
+    byte[] bits = DKV.get(key).memOrLoad();
     int offset = 0;
     int state = _skipFirstLine ? SKIP_LINE : WHITESPACE_BEFORE_TOKEN;
     int quotes = 0;
@@ -401,7 +404,7 @@ NEXT_CHAR:
         secondChunk = 0;
         Value v = DKV.get(key); // we had the last key
         assert (v != null) : "The value used to be there!";
-        bits = v.get();
+        bits = v.memOrLoad();
         offset += bits.length;
         _str.set(bits,offset,0);
       } else if (offset >= bits.length) {
@@ -421,7 +424,7 @@ NEXT_CHAR:
         offset -= bits.length;
         tokenStart -= bits.length;
         long chkidx = ValueArray.getChunkIndex(key);
-        Value v = (secondChunk < 2 && chkidx+1 < _ary.chunks()) 
+        Value v = (secondChunk < 2 && chkidx+1 < _ary.chunks())
           ? DKV.get(_ary.getChunkKey(chkidx+1)) : null;
         // if we can't get further we might have been the last one and we must
         // commit the latest guy if we had one.
@@ -432,7 +435,7 @@ NEXT_CHAR:
           }
           break MAIN_LOOP;
         }
-        bits = v.get();         // Could limit to eg 512 bytes
+        bits = v.memOrLoad();         // Could limit to eg 512 bytes
         if (bits[0] == CHAR_LF && state == EXPECT_COND_LF)
           break MAIN_LOOP; // when the first character we see is a line end
       }
@@ -471,6 +474,15 @@ NEXT_CHAR:
       _numlines = numlines;
       _bits = bits;
     }
+    @Override public boolean equals( Object o ) {
+      if( o == null || !(o instanceof Setup) ) return false;
+      Setup s = (Setup)o;
+      // "Compatible" setups means same columns and same separators
+      return _separator == s._separator && _data[0].length == s._data[0].length;
+    }
+    @Override public String toString() {
+      return "'"+_separator+"' head="+_header+" cols="+_data[0].length;
+    }
   }
 
   /** Separators recognized by the parser.  You can add new separators to this
@@ -480,7 +492,7 @@ NEXT_CHAR:
    *  last one as it is used if all other fails because multiple spaces can be
    *  used as a single separator.
    */
-  private static byte[] separators = new byte[] { ',', ';', '|', '\t', ' ' };
+  private static byte[] separators = new byte[] { 1/* '^A',  Hive table column separator */, ',', ';', '|', '\t',  ' '/*space is last in this list, because we allow multiple spaces*/ };
 
   /** Dermines the number of separators in given line. Correctly handles quoted
    * tokens.
@@ -588,7 +600,7 @@ NEXT_CHAR:
         } catch (NumberFormatException e) { /*Pass - determining if number is possible*/ }
       }
     }
-    
+
     // Return an array with headers in data[0] and the remaining rows pre-parsed.
     String[][] data = new String[lines.size()+(hasHeader?0:1)][];
     int l=0;
@@ -602,17 +614,18 @@ NEXT_CHAR:
     while( m < lines.size() )
       data[l++] = determineTokens(lines.get(m++), separator);
     assert data.length==l : data.length +" "+l+" has="+hasHeader;
-    
+
     return new Setup(separator, hasHeader, data, numlines, bits);
   }
 
   /** Determines the CSV parser setup from the first two lines.  Also parses
    *  the next few lines, tossing out comments and blank lines.
    *
-   *  A separator is selected if both two lines have the same ammount of them
+   *  A separator is given or it is selected if both two lines have the same ammount of them
    *  and the tokenization then returns same number of columns.
    */
-  public static Setup guessCsvSetup(byte[] bits) {
+  public static Setup guessCsvSetup(byte[] bits) { return guessCsvSetup(bits, NO_SEPARATOR); }
+  public static Setup guessCsvSetup(byte[] bits, byte separator) {
     ArrayList<String> lines = new ArrayList();
     int offset = 0;
     int numlines = 0;
@@ -631,28 +644,40 @@ NEXT_CHAR:
       }
     }
     // we do not have enough lines to decide
-    if( lines.size() < 2 ) return new Setup((byte)' ',false,null,0,bits);
+    if( lines.size() < 2 ) return new Setup(separator!=NO_SEPARATOR ? (byte)' ' : separator,false,null,0,bits);
     // when we have two lines, calculate the separator counts on them
     int[] s1 = determineSeparatorCounts(lines.get(0));
     int[] s2 = determineSeparatorCounts(lines.get(1));
-    // now we have the counts - if both lines have the same number of separators
-    // the we assume it is the separator. Separators are ordered by their
-    // likelyhoods. If no separators have same counts, space will be used as the
-    // default one
-    for (int i = 0; i < s1.length; ++i)
-      if (((s1[i] == s2[i]) && (s1[i] != 0)) || (i == separators.length-1)) {
-        try {
-          String[] t1 = determineTokens(lines.get(0), separators[i]);
-          String[] t2 = determineTokens(lines.get(1), separators[i]);
-          if (t1.length != t2.length)
-            continue;
-          return guessColumnNames(t1,t2,separators[i],lines,numlines, bits);
-        } catch (Exception e) { /*pass; try another parse attempt*/ }
-      }
+    // If the separator is specified parse with its value
+    if (separator!=NO_SEPARATOR) {
+      try {
+        String[] t1 = determineTokens(lines.get(0), separator);
+        String[] t2 = determineTokens(lines.get(1), separator);
+        if (t1.length == t2.length)
+          return guessColumnNames(t1,t2,separator,lines,numlines, bits);
+      } catch (Exception e) { /*pass; try another parse attempt*/ }
+    // Or try to guess the separator
+    } else {
+      // now we have the counts - if both lines have the same number of separators
+      // the we assume it is the separator. Separators are ordered by their
+      // likelyhoods. If no separators have same counts, space will be used as the
+      // default one
+      for (int i = 0; i < s1.length; ++i)
+        if (((s1[i] == s2[i]) && (s1[i] != 0)) || (i == separators.length-1)) {
+          try {
+            String[] t1 = determineTokens(lines.get(0), separators[i]);
+            String[] t2 = determineTokens(lines.get(1), separators[i]);
+            if (t1.length != t2.length)
+              continue;
+            return guessColumnNames(t1,t2,separators[i],lines,numlines, bits);
+          } catch (Exception e) { /*pass; try another parse attempt*/ }
+        }
+    }
     return new Setup((byte)' ',false,null,0,bits);
   }
 
-  public static Setup inspect(byte[] bits) {
-    return guessCsvSetup(bits);
+  public static Setup inspect(byte[] bits) { return inspect(bits, NO_SEPARATOR); }
+  public static Setup inspect(byte[] bits, byte separator) {
+    return guessCsvSetup(bits, separator);
   }
 }

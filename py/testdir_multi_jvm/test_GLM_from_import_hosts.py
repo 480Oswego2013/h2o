@@ -2,7 +2,7 @@ import os, json, unittest, time, shutil, sys
 sys.path.extend(['.','..','py'])
 
 import h2o, h2o_cmd
-import h2o_hosts
+import h2o_hosts, h2o_glm
 import h2o_browse as h2b
 import h2o_import as h2i
 import time, random, copy
@@ -59,12 +59,11 @@ class Basic(unittest.TestCase):
             start = time.time()
             # can't pass lamba as kwarg because it's a python reserved word
             # FIX! just look at X=0:1 for speed, for now
-            kwargs = {'y': 54, 'num_cross_validation_folds': 2, 'family': "binomial", 'case': 1}
+            kwargs = {'y': 54, 'n_folds': 2, 'family': "binomial", 'case': 1}
             glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=2000, **kwargs)
+            h2o_glm.simpleCheckGLM(self, glm, None, **kwargs)
 
-            # different when num_cross_validation_foldsidation is used? No trainingErrorDetails?
             h2o.verboseprint("\nglm:", glm)
-
             h2b.browseJsonHistoryAsUrlLastMatch("GLM")
 
             GLMModel = glm['GLMModel']

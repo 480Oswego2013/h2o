@@ -1,6 +1,9 @@
 package water;
+
 import java.io.File;
-//import org.hyperic.sigar.Udp;
+import java.lang.management.ManagementFactory;
+
+import javax.management.*;
 
 /**
  * Starts a thread publishing multicast HeartBeats to the local subnet: the
@@ -44,6 +47,13 @@ public class HeartBeatThread extends Thread {
   // with the membership Heartbeat, they will start a round of Paxos group
   // discovery.
   public void run() {
+    MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
+    ObjectName os;
+    try {
+      os = new ObjectName("java.lang:type=OperatingSystem");
+    } catch( MalformedObjectNameException ex ) {
+      throw new RuntimeException(ex);
+    }
     Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
     while( true ) {
       // Once per second, for the entire cloud a Node will multi-cast publish
@@ -52,6 +62,7 @@ public class HeartBeatThread extends Thread {
       catch( InterruptedException e ) { }
 
       // Update the interesting health self-info for publication also
+      H2O cloud = H2O.CLOUD;
       HeartBeat hb = H2O.SELF._heartbeat;
       hb._hb_version = HB_VERSION++;
       hb._jvm_boot_msec= TimeLine.JVM_BOOT_MSEC;
@@ -62,12 +73,26 @@ public class HeartBeatThread extends Thread {
       hb._keys       = (H2O.STORE.size ());
       hb.set_valsz     (myHisto.histo(false)._cached);
       hb._num_cpus   = (char)run.availableProcessors();
-      hb._rpcs       = (char)RPC.TASKS.size();
-      hb._fjthrds_hi = (char)H2O.FJP_HI  .getPoolSize();
-      hb._fjthrds_lo = (char)H2O.FJP_NORM.getPoolSize();
-      hb._fjqueue_hi = (char)H2O.FJP_HI  .getQueuedSubmissionCount();
-      hb._fjqueue_lo = (char)H2O.FJP_NORM.getQueuedSubmissionCount();
-      hb._tcps_active= (char)TCPReceiverThread.TCPS_IN_PROGRESS.get();
+      Object load = null;
+      try {
+        load = mbs.getAttribute(os, "SystemLoadAverage");
+      } catch( Exception e ) {
+        // Ignore, data probably not available on this VM
+      }
+      hb._system_load_average = load instanceof Double ? ((Double) load).floatValue() : 0;
+      int rpcs = 0;
+      for( H2ONode h2o : cloud._memary )
+        rpcs += h2o.taskSize();
+      hb._rpcs       = (char)rpcs;
+      hb._fjthrds_hi = new short[H2O.MAX_PRIORITY+1-H2O.MIN_HI_PRIORITY];
+      hb._fjqueue_hi = new short[H2O.MAX_PRIORITY+1-H2O.MIN_HI_PRIORITY];
+      for( int i=0; i<hb._fjthrds_hi.length; i++ ) {
+        hb._fjthrds_hi[i] = (short)H2O.hiQPoolSize(i);
+        hb._fjqueue_hi[i] = (short)H2O.getHiQueue(i);
+      }
+      hb._fjthrds_lo = (char)H2O.loQPoolSize();
+      hb._fjqueue_lo = (char)H2O.getLoQueue();
+      hb._tcps_active= (char)AutoBuffer.TCPS.get();
       // get the usable and total disk storage for the partition where the
       // persistent KV pairs are stored
       if (PersistIce.ROOT==null) {
@@ -81,7 +106,6 @@ public class HeartBeatThread extends Thread {
 
       // Announce what Cloud we think we are in.
       // Publish our health as well.
-      H2O cloud = H2O.CLOUD;
       UDPHeartbeat.build_and_multicast(cloud, hb);
 
       // If we have no internet connection, then the multicast goes

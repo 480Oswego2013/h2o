@@ -2,7 +2,7 @@ import unittest
 import time, sys
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd, h2o_glm
+import h2o, h2o_cmd, h2o_glm, h2o_hosts
 import h2o_browse as h2b
 import h2o_exec as h2e
 
@@ -28,7 +28,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(node_count=1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=1)
+        else:
+            h2o_hosts.build_cloud_with_hosts(node_count=1)
 
     @classmethod
     def tearDownClass(cls):
@@ -55,7 +60,7 @@ class Basic(unittest.TestCase):
 
         if (1==1):
             start = time.time()
-            kwargs = {'y': 13, 'num_cross_validation_folds': 6}
+            kwargs = {'y': 13, 'n_folds': 6}
             # hmm. maybe we should update to use key as input
             # in case exec is used to change the parseKey
             # in any case, the destination_key in parseKey was what was updated
@@ -78,7 +83,7 @@ class Basic(unittest.TestCase):
 
         if (1==1):
             start = time.time()
-            kwargs = {'y': 13, 'num_cross_validation_folds': 6}
+            kwargs = {'y': 13, 'n_folds': 6}
             glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=300, **kwargs)
             h2o_glm.simpleCheckGLM(self, glm, None, **kwargs)
             print "glm end on ", csvPathname, 'took', time.time() - start, 'seconds'

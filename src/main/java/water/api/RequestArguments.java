@@ -854,12 +854,11 @@ public class RequestArguments extends RequestStatics {
 
   public abstract class MultipleText<T> extends Argument<T> {
     protected abstract String[] textValues();
-
     protected abstract String[] textNames();
 
-    protected String[] textPrefixes() {
-      return null;
-    }
+    protected String[] textPrefixes() { return null; }
+    protected String[] textSuffixes() { return null; }
+    protected String   textSuffix()   { return null; }
 
 
     public MultipleText(String name, boolean required) {
@@ -873,10 +872,15 @@ public class RequestArguments extends RequestStatics {
       StringBuilder sb = new StringBuilder();
       sb.append("<div style='max-height:300px;overflow:auto'>");
       String[] prefixes = textPrefixes();
-      String[] values = textValues();
-      String[] names = textNames();
-      if (prefixes == null)
-        prefixes = names;
+      String[] values   = textValues();
+      String[] names    = textNames();
+      String[] suffixes = textSuffixes();
+      if (prefixes == null) prefixes = names;
+      if (suffixes == null && textSuffix() != null) {
+        suffixes = new String[names.length];
+        String suffix = textSuffix();
+        for(int i = 0; i<names.length; i++) suffixes[i] = suffix;
+      }
       if (values == null) {
         values = new String[prefixes.length];
         for (int i = 0; i < values.length; ++i)
@@ -886,10 +890,11 @@ public class RequestArguments extends RequestStatics {
       if (values.length == 0)
         sb.append("<div class='alert alert-error'>No editable controls under current setup</div>");
       for (int i = 0 ; i < values.length; ++i) {
-        sb.append("<div class='input-append'>"
-                + "<input class='span3' name='"+names[i]+"' id='"+_name+String.valueOf(i)+"' type='text' value='"+values[i]+"' placeholder='"+queryDescription()+"'>"
-                + "<span class='add-on'>" + prefixes[i]+"</span>"
-                + "</div>");
+        sb.append("<div class='input-prepend" + (suffixes!=null?" input-append":"") + "'>");
+        sb.append("<span class='add-on'>" + prefixes[i]+"</span>");
+        sb.append("<input class='span3' name='"+names[i]+"' id='"+_name+String.valueOf(i)+"' type='text' value='"+values[i]+"' placeholder='"+queryDescription()+"'>");
+        if (suffixes!=null) sb.append("<span class='add-on'>" + suffixes[i]+"</span>");
+        sb.append("</div>");
       }
       sb.append("</div>");
       return sb.toString();
@@ -1440,20 +1445,18 @@ public class RequestArguments extends RequestStatics {
   // ---------------------------------------------------------------------------
   // H2OKey
   // ---------------------------------------------------------------------------
-
   public class H2OKey extends InputText<Key> {
-
     public final Key _defaultValue;
-
     public H2OKey(String name) {
-      super(name, true);
+      this(name, true);
+    }
+    public H2OKey(String name, boolean required) {
+      super(name, required);
       _defaultValue = null;
     }
-
     public H2OKey(String name, String keyName) {
       this(name, Key.make(keyName));
     }
-
     public H2OKey(String name, Key key) {
       super(name, false);
       _defaultValue = key;
@@ -1471,31 +1474,24 @@ public class RequestArguments extends RequestStatics {
     @Override protected String queryDescription() {
       return "Valid H2O key";
     }
-
   }
 
   // ---------------------------------------------------------------------------
   // H2OExistingKey
   // ---------------------------------------------------------------------------
-
   public class H2OExistingKey extends TypeaheadInputText<Value> {
-
     public final Key _defaultValue;
-
     public H2OExistingKey(String name) {
       super(TypeaheadKeysRequest.class, name, true);
       _defaultValue = null;
     }
-
     public H2OExistingKey(String name, String keyName) {
       this(name, Key.make(keyName));
     }
-
     public H2OExistingKey(String name, Key key) {
       super(TypeaheadKeysRequest.class, name, false);
       _defaultValue = key;
     }
-
     @Override protected Value parse(String input) throws IllegalArgumentException {
       Key k = Key.make(input);
       Value v = DKV.get(k);
@@ -1518,7 +1514,6 @@ public class RequestArguments extends RequestStatics {
   // ---------------------------------------------------------------------------
   // H2OHexKey
   // ---------------------------------------------------------------------------
-
   public class H2OHexKey extends TypeaheadInputText<ValueArray> {
     public final Key _defaultKey;
 
@@ -1541,20 +1536,14 @@ public class RequestArguments extends RequestStatics {
       Value v = DKV.get(k);
       if (v == null)
         throw new IllegalArgumentException("Key "+input+" not found!");
-      if (v._isArray == 0)
+      if (!v.isArray())
         throw new IllegalArgumentException("Key "+input+" is not a valid HEX key");
-      ValueArray va = ValueArray.value(v);
-      if ((va._cols == null) || (va._cols.length == 0))
-        throw new IllegalArgumentException("Key "+input+" is not a valid HEX key");
-      return va;
+      return v.get();
     }
 
     @Override protected ValueArray defaultValue() {
-      try {
-        return ValueArray.value(DKV.get(_defaultKey));
-      } catch (Exception e) {
-        return null;
-      }
+      if(_defaultKey == null) return null;
+      return DKV.get(_defaultKey).get();
     }
 
     @Override protected String queryDescription() {
@@ -1563,40 +1552,34 @@ public class RequestArguments extends RequestStatics {
   }
 
   // -------------------------------------------------------------------------
-  public class H2OModelKey<T extends Model> extends TypeaheadInputText<T> {
-    private final String _filter_string;
-    public H2OModelKey(TypeaheadKeysRequest tkr, String name, boolean req) {
-      super(tkr.getClass(), name, req);
-      _filter_string = tkr._filter.defaultValue();
-    }
-
-    @Override protected T parse(String input) throws IllegalArgumentException {
-      if( input.indexOf(_filter_string) == -1 )
-        throw new IllegalArgumentException("Key "+input+" is not a Model key");
+  public class H2OModelKey<TM extends Model, TK extends TypeaheadKeysRequest> extends TypeaheadInputText<TM> {
+    public H2OModelKey(TK tkr, String name, boolean req) { super(tkr.getClass(), name, req); }
+    @Override protected TM parse(String input) throws IllegalArgumentException {
       Key k = Key.make(input);
       Value v = DKV.get(k);
       if (v == null)
         throw new IllegalArgumentException("Key "+input+" not found!");
-      try {
-        // TODO - replace me with proper typed Values
-        T m = null;
-        if( input.startsWith(   GLMModel.KEY_PREFIX)  ) m = (T)new    GLMModel();
-        if( input.startsWith(KMeansModel.KEY_PREFIX)  ) m = (T)new KMeansModel();
-        if( input.startsWith(    RFModel.KEY_PREFIX)  ) m = (T)new     RFModel();
-        return m.read(new AutoBuffer(v.get()));
-      } catch(Throwable t) {
-        throw new IllegalArgumentException("Key "+input+" is not a Model key");
-      }
+      return v.get();
     }
-
     @Override protected String queryDescription() { return "An existing H2O Model key"; }
-    @Override protected T defaultValue() { return null; }
+    @Override protected TM defaultValue() { return null; }
   }
 
   // -------------------------------------------------------------------------
-  public class H2OGLMModelKey extends H2OModelKey<GLMModel> {
+  public class H2OGLMModelKey extends H2OModelKey<GLMModel, TypeaheadGLMModelKeyRequest> {
     public H2OGLMModelKey(String name, boolean req) {
-      super(new TypeaheadGLMModelKeyRequest(), name, req);
+      super(new TypeaheadGLMModelKeyRequest(),name, req);
+    }
+  }
+  // -------------------------------------------------------------------------
+  public class RFModelKey extends H2OModelKey<RFModel, TypeaheadRFModelKeyRequest> {
+    public RFModelKey(String name) {
+      super(new TypeaheadRFModelKeyRequest(),name, true);
+    }
+  }
+  public class H2OKMeansModelKey extends H2OModelKey<KMeansModel, TypeaheadKMeansModelKeyRequest> {
+    public H2OKMeansModelKey(String name, boolean req) {
+      super(new TypeaheadKMeansModelKeyRequest(),name, req);
     }
   }
 
@@ -1754,7 +1737,6 @@ public class RequestArguments extends RequestStatics {
 
     // "values" to send back and for in URLs.  Use numbers for density (shorter URLs).
     @Override protected final String[] selectValues() {
-      ValueArray va = _key.value();
       String [] res = new String[_selectedCols.size()];
       int idx = 0;
       for(int i : _selectedCols) res[idx++] = String.valueOf(i);
@@ -1876,14 +1858,14 @@ public class RequestArguments extends RequestStatics {
       };
     }
     double _maxNAsRatio = 0.1;
-    ThreadLocal<ArrayList<String>> _constantColumns = new ThreadLocal<ArrayList<String>>();
+    ThreadLocal<TreeSet<String>> _constantColumns = new ThreadLocal<TreeSet<String>>();
     ThreadLocal<Integer> _badColumns = new ThreadLocal<Integer>();
 
     @Override
     public boolean shouldIgnore(int i, ValueArray.Column ca ) {
       if(ca._min == ca._max){
         if(_constantColumns.get() == null)
-          _constantColumns.set(new ArrayList<String>());
+          _constantColumns.set(new TreeSet<String>());
         _constantColumns.get().add(Objects.firstNonNull(ca._name, String.valueOf(i)));
         return true;
       }
@@ -1910,8 +1892,7 @@ public class RequestArguments extends RequestStatics {
     @Override
     public String queryComment(){
       if(_constantColumns.get() == null || _constantColumns.get().isEmpty())return "";
-      ArrayList<String> ignoredCols = _constantColumns.get();
-      Collections.sort(ignoredCols);
+      TreeSet<String> ignoredCols = _constantColumns.get();
       if(_badColumns.get() != null && _badColumns.get() > 0)
         return "<div class='alert'><b> There were " + _badColumns.get() + " bad columns not selected by default. Ignoring " + _constantColumns.get().size() + " constant columns</b>: " + ignoredCols.toString() +"</div>";
       else
@@ -2046,9 +2027,9 @@ public class RequestArguments extends RequestStatics {
   // ---------------------------------------------------------------------------
 
   public class H2OCategoryStrata extends MultipleText<int[]> {
-    public final H2OHexKey _key;
+    public final H2OHexKey    _key;
     public final H2OHexKeyCol _classCol;
-    public final int _defaultValue;
+    public final int          _defaultValue;
 
     public H2OCategoryStrata(String name, H2OHexKey key, H2OHexKeyCol classCol, int defaultValue) {
       super(name,false);
@@ -2144,7 +2125,7 @@ public class RequestArguments extends RequestStatics {
     }
 
     @Override protected String queryDescription() {
-      return "Category strata (integer)";
+      return "Category strata sampling rates (in %)";
     }
 
     public Map<Integer,Integer> convertToMap() {
@@ -2152,39 +2133,11 @@ public class RequestArguments extends RequestStatics {
       if ((v == null) || (v.length == 0))
         return null;
       Map<Integer,Integer> result = new HashMap();
-      for (int i = 0; i < v.length; ++i) {
-        if (v[i] != _defaultValue)
-          result.put(i, v[i]);
-      }
+      for (int i = 0; i < v.length; ++i) result.put(i, v[i]);
       return result;
     }
 
-  }
-
-  public class RFModelKey extends TypeaheadInputText<RFModel> {
-
-    public RFModelKey(String name) {
-      super(TypeaheadRFModelKeyRequest.class, name, true);
-    }
-
-    @Override protected RFModel parse(String input) throws IllegalArgumentException {
-      Value v = UKV.get(Key.make(input));
-      if( v == null )
-        throw new IllegalArgumentException("Key "+input+" was not found");
-      try {
-        return v.get(new RFModel());
-      } catch (Exception e) {
-        throw new IllegalArgumentException("Key "+input+" is not a model key");
-      }
-    }
-
-    @Override protected RFModel defaultValue() {
-      return null;
-    }
-
-    @Override protected String queryDescription() {
-      return "Key of the RF model";
-    }
+    @Override protected String textSuffix() { return "%"; };
   }
 
   public class NTree extends Int {

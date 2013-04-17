@@ -2,7 +2,7 @@ import unittest
 import random, sys
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd, h2o_rf
+import h2o, h2o_cmd, h2o_rf, h2o_hosts
 
 # RF train parameters
 paramsTrainRF = { 
@@ -11,7 +11,7 @@ paramsTrainRF = {
             'parallel'   : 1, 
             'bin_limit'  : 20000,
             'ignore'     : None,
-            'gini'       : 0,
+            'stat_type'  : 'ENTROPY',
             'out_of_bag_error_estimate': 1, 
             'exclusive_split_limit': 0,
             'timeoutSecs': 14800,
@@ -19,6 +19,7 @@ paramsTrainRF = {
 
 # RF test parameters
 paramsTestRF = {
+            'out_of_bag_error_estimate': 0, 
             'timeoutSecs': 14800,
         }
 
@@ -28,7 +29,7 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(node_count=1)
+        h2o_hosts.build_cloud_with_hosts(node_count=1)
 
     @classmethod
     def tearDownClass(cls):

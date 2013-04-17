@@ -3,25 +3,72 @@ import h2o
 import h2o_browse as h2b, h2o_rf as h2f
 
 def parseFile(node=None, csvPathname=None, key=None, key2=None, 
-    timeoutSecs=20, retryDelaySecs=0.5, pollTimeoutSecs=15,
-    noise=None, header=None, noPoll=None):
+    timeoutSecs=30, retryDelaySecs=0.5, pollTimeoutSecs=30,
+    noise=None, noPoll=None, header=None):
     if not csvPathname: raise Exception('No file name specified')
     if not node: node = h2o.nodes[0]
+    ### print "parseFile pollTimeoutSecs:", pollTimeoutSecs
     key = node.put_file(csvPathname, key=key, timeoutSecs=timeoutSecs)
     if key2 is None:
         # don't rely on h2o default key name
         myKey2 = key + '.hex'
     else:
         myKey2 = key2
-    return node.parse(key, myKey2, header=header,
-        timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs, pollTimeoutSecs=pollTimeoutSecs,
-        noise=noise, noPoll=noPoll)
+    return node.parse(key, myKey2, 
+        timeoutSecs, retryDelaySecs, 
+        pollTimeoutSecs=pollTimeoutSecs, noise=noise, noPoll=noPoll,
+        header=header)
+
+def parseS3File(node=None, bucket=None, filename=None, keyForParseResult=None, 
+    timeoutSecs=20, retryDelaySecs=2, pollTimeoutSecs=30, 
+    noise=None, noPoll=None, header=None):
+    ''' Parse a file stored in S3 bucket'''                                                                                                                                                                       
+    if not bucket  : raise Exception('No S3 bucket specified')
+    if not filename: raise Exception('No filename in bucket specified')
+    if not node: node = h2o.nodes[0]
+    
+    import_result = node.import_s3(bucket)
+    s3_key = [f['key'] for f in import_result['succeeded'] if f['file'] == filename ][0]
+    
+    if keyForParseResult is None:
+        myKeyForParseResult = s3_key + '.hex'
+    else:
+        myKeyForParseResult = keyForParseResult
+    return node.parse(s3_key, myKeyForParseResult, 
+        timeoutSecs, retryDelaySecs, 
+        pollTimeoutSecs=pollTimeoutSecs, noise=noise, noPoll=noPoll,
+        header=header)
 
 def runInspect(node=None, key=None, timeoutSecs=5, **kwargs):
     if not key: raise Exception('No key for Inspect specified')
     if not node: node = h2o.nodes[0]
     # FIX! currently there is no such thing as a timeout on node.inspect
     return node.inspect(key, **kwargs)
+
+def infoFromInspect(inspect, csvPathname):
+    # need more info about this dataset for debug
+    cols = inspect['cols']
+    # look for nonzero num_missing_values count in each col
+    sum_num_missing_values = 0
+    for i, colDict in enumerate(cols):
+        num_missing_values = colDict['num_missing_values']
+        if num_missing_values != 0:
+            print "%s: col: %d, num_missing_values: %d" % (csvPathname, i, num_missing_values)
+            sum_num_missing_values += num_missing_values
+
+    num_cols = inspect['num_cols']
+    num_rows = inspect['num_rows']
+    row_size = inspect['row_size']
+    ptype = inspect['type']
+    value_size_bytes = inspect['value_size_bytes']
+    response = inspect['response']
+    ptime = response['time']
+
+    print "num_cols: %s, num_rows: %s, row_size: %s, ptype: %s, \
+           value_size_bytes: %s, time: %s" % \
+           (num_cols, num_rows, row_size, ptype, value_size_bytes, ptime)
+    # sum of num_missing_values from all the columns
+    return sum_num_missing_values
 
 # Not working in H2O yet, but support the test
 def runStore2HDFS(node=None, key=None, timeoutSecs=5, **kwargs):
@@ -51,59 +98,57 @@ def runKMeansOnly(node=None, parseKey=None,
     if not parseKey: raise Exception('No parsed key for KMeans specified')
     if not node: node = h2o.nodes[0]
     print parseKey['destination_key']
-    return node.kmeans(parseKey['destination_key'], None, timeoutSecs, retryDelaySecs, **kwargs)
+    return node.kmeans(parseKey['destination_key'], None, 
+        timeoutSecs, retryDelaySecs, **kwargs)
 
 def runGLM(node=None, csvPathname=None, key=None, 
-        timeoutSecs=20, retryDelaySecs=2, **kwargs):
+        timeoutSecs=20, retryDelaySecs=2, noise=None, **kwargs):
     # use 1/5th the GLM timeoutSecs for allowed parse time.
     pto = max(timeoutSecs/5,10)
     noise = kwargs.pop('noise',None)
     parseKey = parseFile(node, csvPathname, key, timeoutSecs=pto, noise=noise)
-    glm = runGLMOnly(node, parseKey, timeoutSecs, retryDelaySecs, **kwargs)
-    return glm
+    return runGLMOnly(node, parseKey, timeoutSecs, retryDelaySecs, noise=noise, **kwargs)
 
 def runGLMOnly(node=None, parseKey=None, 
-        timeoutSecs=20, retryDelaySecs=2, **kwargs):
+        timeoutSecs=20, retryDelaySecs=2, noise=None, **kwargs):
     if not parseKey: raise Exception('No parsed key for GLM specified')
     if not node: node = h2o.nodes[0]
-    # no such thing as GLMView..don't use retryDelaySecs
-    return node.GLM(parseKey['destination_key'], timeoutSecs, **kwargs)
+    return node.GLM(parseKey['destination_key'], 
+        timeoutSecs, retryDelaySecs, noise=noise, **kwargs)
 
-# FIX! how do we run RF score on another model?
 def runGLMScore(node=None, key=None, model_key=None, timeoutSecs=20):
     if not node: node = h2o.nodes[0]
     return node.GLMScore(key, model_key, timeoutSecs)
 
 def runGLMGrid(node=None, csvPathname=None, key=None, 
-        timeoutSecs=60, retryDelaySecs=2, **kwargs):
+        timeoutSecs=60, retryDelaySecs=2, noise=None, **kwargs):
     # use 1/5th the GLM timeoutSecs for allowed parse time.
     pto = max(timeoutSecs/5,10)
     noise = kwargs.pop('noise',None)
     parseKey = parseFile(node, csvPathname, key, timeoutSecs=pto, noise=noise)
-    glm = runGLMGridOnly(node, parseKey, timeoutSecs, retryDelaySecs, **kwargs)
-    return glm
+    return runGLMGridOnly(node, parseKey, 
+        timeoutSecs, retryDelaySecs, noise=noise, **kwargs)
 
 def runGLMGridOnly(node=None,parseKey=None,
-        timeoutSecs=20,retryDelaySecs=2,**kwargs):
+        timeoutSecs=60, retryDelaySecs=2, noise=None, **kwargs):
     if not parseKey: raise Exception('No parsed key for GLMGrid specified')
     if not node: node = h2o.nodes[0]
     # no such thing as GLMGridView..don't use retryDelaySecs
     return node.GLMGrid(parseKey['destination_key'], timeoutSecs, **kwargs)
 
 def runRF(node=None, csvPathname=None, trees=5, key=None, 
-        timeoutSecs=20, retryDelaySecs=2, **kwargs):
+        timeoutSecs=20, retryDelaySecs=2, rfview=True, noise=None, **kwargs):
     # use 1/5th the RF timeoutSecs for allowed parse time.
     pto = max(timeoutSecs/5,30)
     noise = kwargs.pop('noise',None)
     parseKey = parseFile(node, csvPathname, key, timeoutSecs=pto, noise=noise)
-    return runRFOnly(node, parseKey, trees, timeoutSecs, retryDelaySecs, **kwargs)
+    return runRFOnly(node, parseKey, trees, timeoutSecs, retryDelaySecs, 
+        rfview=rfview, noise=noise, **kwargs)
 
-def runRFTreeView(node=None, n=None, data_key=None, model_key=None, timeoutSecs=20, **kwargs):
-    if not node: node = h2o.nodes[0]
-    return node.random_forest_treeview(n, data_key, model_key, timeoutSecs, **kwargs)
-
-def runRFOnly(node=None, parseKey=None, trees=5,
-        timeoutSecs=20, retryDelaySecs=2, **kwargs):
+# rfView can be used to skip the rf completion view
+# for creating multiple rf jobs
+def runRFOnly(node=None, parseKey=None, trees=5, 
+        timeoutSecs=20, retryDelaySecs=2, rfview=True, noise=None, noPrint=False, **kwargs):
     if not parseKey: raise Exception('No parsed key for RF specified')
     if not node: node = h2o.nodes[0]
     #! FIX! what else is in parseKey that we should check?
@@ -115,7 +160,6 @@ def runRFOnly(node=None, parseKey=None, trees=5,
     # if we model_key was given to rf via **kwargs, remove it, since we're passing 
     # model_key from rf. can't pass it in two places. (ok if it doesn't exist in kwargs)
     data_key  = rf['data_key']
-    kwargs.pop('model_key',None)
     kwargs.pop('model_key',None)
     model_key = rf['model_key']
     rfCloud = rf['response']['h2o']
@@ -129,29 +173,25 @@ def runRFOnly(node=None, parseKey=None, trees=5,
     # /ip:port of cloud (can't use h2o name)
     rfClass= rf['response_variable']
 
-    rfView = runRFView(node, data_key, model_key, ntree, timeoutSecs, retryDelaySecs, **kwargs)
-    return rfView
+    rfViewResult = None
+    if rfview:
+        rfViewResult = runRFView(node, data_key, model_key, ntree, 
+            timeoutSecs, retryDelaySecs, noise=noise, noPrint=noPrint, **kwargs)
+    
+    return rfViewResult
 
-# scoring on browser does these:
-# RFView.html?
-# data_key=a5m.hex&
-# model_key=__RFModel_81c5063c-e724-4ebe-bfc1-3ac6838bc628&
-# FIX! why not in model?
-# response_variable=1&
-# FIX why needed?
-# ntree=50&
-# FIX! why not in model
-# class_weights=-1%3D1.0%2C0%3D1.0%2C1%3D1.0&
-# FIX! no longer?
-# out_of_bag_error_estimate=1&
-# FIX! scoring only
-# no_confusion_matrix=1&
-# clear_confusion_matrix=1
-
-def runRFView(node=None, data_key=None, model_key=None, ntree=None, timeoutSecs=15, retryDelaySecs=2, **kwargs):
+def runRFTreeView(node=None, n=None, data_key=None, model_key=None, timeoutSecs=20, **kwargs):
     if not node: node = h2o.nodes[0]
+    return node.random_forest_treeview(n, data_key, model_key, timeoutSecs, **kwargs)
+
+
+def runRFView(node=None, data_key=None, model_key=None, ntree=None, 
+    timeoutSecs=15, retryDelaySecs=2, 
+    noise=None, noPoll=False, noPrint=False, **kwargs):
+    if not node: node = h2o.nodes[0]
+
     def test(n, tries=None):
-        rfView = n.random_forest_view(data_key, model_key, timeoutSecs, **kwargs)
+        rfView = n.random_forest_view(data_key, model_key, timeoutSecs, noise=noise, **kwargs)
         status = rfView['response']['status']
         numberBuilt = rfView['trees']['number_built']
 
@@ -170,8 +210,8 @@ def runRFView(node=None, data_key=None, model_key=None, ntree=None, timeoutSecs=
         errorInResponse = \
             numberBuilt<0 or ntree<0 or numberBuilt>ntree or \
             progress<0 or progressTotal<0 or progress>progressTotal or \
-            progressTotal!=(ntree+1) or \
             ntree!=rfView['ntree']
+            ## progressTotal!=ntree or
             # rfView better always agree with what RF ntree was
 
         if errorInResponse:
@@ -190,16 +230,17 @@ def runRFView(node=None, data_key=None, model_key=None, ntree=None, timeoutSecs=
 
         return (status!='poll')
 
+    if noPoll:
+        return None
+
     node.stabilize(
             test,
             'random forest reporting %d trees' % ntree,
             timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs)
 
     # kind of wasteful re-read, but maybe good for testing
-    rfView = node.random_forest_view(data_key, model_key, timeoutSecs, **kwargs)
-    h2f.simpleCheckRFView(node, rfView)
-
-
+    rfView = node.random_forest_view(data_key, model_key, timeoutSecs, noise=noise, **kwargs)
+    h2f.simpleCheckRFView(node, rfView, noPrint=noPrint)
     return rfView
          
 def port_live(ip, port):
@@ -238,66 +279,3 @@ def sleep_with_dot(sec, message=None):
         dot()
         count += 1
 
-def parseS3File(node=None, bucket=None, filename=None, keyForParseResult=None, timeoutSecs=20, **kwargs):
-    ''' Parse a file stored in S3 bucket'''                                                                                                                                                                       
-    if not bucket  : raise Exception('No S3 bucket specified')
-    if not filename: raise Exception('No filename in bucket specified')
-    if not node: node = h2o.nodes[0]
-    
-    import_result = node.import_s3(bucket)
-    s3_key = [f['key'] for f in import_result['succeeded'] if f['file'] == filename ][0]
-    
-    if keyForParseResult is None:
-        myKeyForParseResult = s3_key + '.hex'
-    else:
-        myKeyForParseResult = keyForParseResult
-    return node.parse(s3_key, myKeyForParseResult, timeoutSecs=timeoutSecs, **kwargs)
-
-'''
-RF scoring 
-def runRFView(node=None, parseKey=None, modelKey=None, ntree=None,
-        timeoutSecs=20, retryDelaySecs=2, **kwargs):
-    if not parseKey: raise Exception('No parse key for RFView specified')
-    if not modelKey: raise Exception('No model key for RFView specified')
-    if not ntree: raise Exception('No number of trees for RFView specified')
-    if not node: node = h2o.nodes[0]
-    
-    dataKey = parseKey['destination_key']
-    h2o.verboseprint("runRFView dataKey: {0}, modelKey: {1}".format(modelKey, dataKey))
-
-    def testRFProgress(n):
-        rfView = n.random_forest_view(dataKey, modelKey, timeoutSecs, **kwargs)
-        status = rfView['response']['status']
-        numberBuilt = rfView['trees']['number_built']
-
-        if status == 'done': 
-            if numberBuilt!=ntree: 
-                raise Exception("RFview done but number_built!=ntree: %s %s", 
-                    numberBuilt, ntree)
-            return True
-        if status != 'poll': raise Exception('Unexpected status: ' + status)
-
-        progress = rfView['response']['progress']
-        progressTotal = rfView['response']['progress_total']
-
-        # don't print the useless first poll. ma
-        if (status!='done'):
-            if numberBuilt==0:
-                h2o.verboseprint(".")
-            else:
-                h2o.verboseprint("\nRFView polling. Status: %s. %s trees done of %s desired" % 
-                    (status, numberBuilt, ntree))
-
-        return (status=='done')
-
-    node.stabilize(
-            testRFProgress,
-            'random forest reporting %d trees' % ntree,
-            timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs)
-
-    # Re-read results 
-    rfView = node.random_forest_view(dataKey, modelKey, timeoutSecs, **kwargs)
-    h2f.simpleCheckRFView(node, rfView)
-
-    return rfView
-'''

@@ -8,9 +8,7 @@ import java.io.File;
 import java.util.*;
 
 import water.*;
-import water.DRemoteTask.DFuture;
 import water.Timer;
-import water.util.TestUtil;
 import water.util.Utils;
 
 /**
@@ -39,17 +37,29 @@ public class RandomForest {
     Utils.pln("[RF] number of split features: "+ drf.numSplitFeatures());
     Utils.pln("[RF] starting RF computation with "+ data.rows()+" rows ");
 
-    Random rnd = Utils.getRNG(data.seed() + ROOT_SEED_ADD);
+    Random  rnd     = Utils.getRNG(data.seed() + ROOT_SEED_ADD);
+    Sampling sampler = createSampler(drf);
     for (int i = 0; i < ntrees; ++i) {
       long treeSeed = rnd.nextLong() + TREE_SEED_INIT; // make sure that enough bits is initialized
       trees[i] = new Tree( data, maxTreeDepth, minErrorRate, stat, numSplitFeatures, treeSeed,
-                           drf._job,i,drf._ntrees, drf._sample, drf._numrows,
-                           drf._useStratifySampling, drf._strata,
-                           drf._verbose, drf._exclusiveSplitLimit );
+                           drf._job,i, drf._verbose, drf._exclusiveSplitLimit, sampler );
       if (!parallelTrees)   DRemoteTask.invokeAll(new Tree[]{trees[i]});
     }
     if(parallelTrees)DRemoteTask.invokeAll(trees);
     Utils.pln("All trees ("+ntrees+") done in "+ t_alltrees);
+  }
+
+  static Sampling createSampler(final DRF drf) {
+    switch(drf._samplingStrategy) {
+    case RANDOM          : return new Sampling.Random(drf._sample, drf._numrows);
+    case STRATIFIED_LOCAL:
+      float[] ss = new float[drf._strataSamples.length];
+      for (int i=0;i<ss.length;i++) ss[i] = drf._strataSamples[i] / 100.f;
+      return new Sampling.StratifiedLocal(ss, drf._numrows);
+    default:
+      assert false : "Unsupported sampling strategy";
+      return null;
+    }
   }
 
 
@@ -58,7 +68,7 @@ public class RandomForest {
     String  rawKey;
     String  parsedKey;
     String  validationFile;
-    String  h2oArgs       = " --name=Test"+ System.nanoTime()+ " ";
+    String  h2oArgs;
     int     ntrees        = 10;
     int     depth         = Integer.MAX_VALUE;
     int     sample        = 67;
@@ -95,15 +105,21 @@ public class RandomForest {
   public static void main(String[] args) throws Exception {
     Arguments arguments = new Arguments(args);
     arguments.extract(ARGS);
-    if(ARGS.h2oArgs.startsWith("\"") && ARGS.h2oArgs.endsWith("\""))
-      ARGS.h2oArgs = ARGS.h2oArgs.substring(1, ARGS.h2oArgs.length()-1);
-    ARGS.h2oArgs = ARGS.h2oArgs.trim();
-    String [] h2oArgs = ARGS.h2oArgs.split("[ \t]+");
+    String[] h2oArgs;
+    if(ARGS.h2oArgs == null) { // By default run using local IP, C.f. JUnitRunner
+      File flat = Utils.tempFile("127.0.0.1:54327");
+      h2oArgs = new String[] { "-ip=127.0.0.1", "-flatfile=" + flat.getAbsolutePath() };
+    } else {
+      if(ARGS.h2oArgs.startsWith("\"") && ARGS.h2oArgs.endsWith("\""))
+        ARGS.h2oArgs = ARGS.h2oArgs.substring(1, ARGS.h2oArgs.length()-1);
+      ARGS.h2oArgs = ARGS.h2oArgs.trim();
+      h2oArgs = ARGS.h2oArgs.split("[ \t]+");
+    }
     H2O.main(h2oArgs);
     ValueArray va;
     // get the input data
     if(ARGS.parsedKey != null) // data already parsed
-      va = ValueArray.value(DKV.get(Key.make(ARGS.parsedKey)));
+      va = DKV.get(Key.make(ARGS.parsedKey)).get();
     else if(ARGS.rawKey != null) // data loaded in K/V, not parsed yet
       va = TestUtil.parse_test_key(Key.make(ARGS.rawKey),Key.make(TestUtil.getHexKeyFromRawKey(ARGS.rawKey)));
     else { // data outside of H2O, load and parse
@@ -162,19 +178,19 @@ public class RandomForest {
                           va,
                           ARGS.ntrees,
                           ARGS.depth,
-                          (ARGS.sample/100.0f),
-                          (short)ARGS.binLimit,
+                          ARGS.binLimit,
                           st,
                           ARGS.seed,
                           ARGS.parallel==1,
                           classWeights,
                           ARGS.features, // number of split features or -1 (default)
-                          ARGS.stratify,
-                          strata,
+                          ARGS.stratify ? Sampling.Strategy.STRATIFIED_LOCAL : Sampling.Strategy.RANDOM,
+                          (ARGS.sample/100.0f),
+                          /* FIXME strata*/ null,
                           ARGS.verbose,
                           ARGS.exclusive);
     DRF drf = drfResult.get();  // block on all nodes!
-    RFModel model = UKV.get(modelKey, new RFModel());
+    RFModel model = UKV.get(modelKey);
     Utils.pln("[RF] Random forest finished in "+ drf._t_main);
 
     Timer t_valid = new Timer();

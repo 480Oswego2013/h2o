@@ -3,13 +3,11 @@ import random, sys, time
 sys.path.extend(['.','..','py'])
 import json
 
-import h2o, h2o_cmd
-import h2o_glm
+import h2o, h2o_cmd, h2o_hosts, h2o_glm
 
 def define_params():
     paramDict = {
         'family': [None, 'gaussian', 'binomial', 'poisson'],
-        'num_cross_validation_folds': [2,3,4,9],
         'thresholds': [0.1, 0.5, 0.7, 0.9],
         # seem to get zero coeffs with lamba=1 case=7
         # just keep the range smaller for this dataset
@@ -34,7 +32,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(node_count=1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=1)
+        else:
+            h2o_hosts.build_cloud_with_hosts(node_count=1)
 
     @classmethod
     def tearDownClass(cls):
@@ -55,13 +58,14 @@ class Basic(unittest.TestCase):
         paramDict = define_params()
         for trial in range(20):
             # params is mutable. This is default.
-            params = {'y': 54, 'case': 1, 'alpha': 0, 'lambda': 0}
+            params = {'y': 54, 'case': 1, 'alpha': 0, 'lambda': 0, 'n_folds': 1}
             colX = h2o_glm.pickRandGlmParams(paramDict, params)
             kwargs = params.copy()
             start = time.time()
             glm = h2o_cmd.runGLMOnly(timeoutSecs=70, parseKey=parseKey, **kwargs)
             # pass the kwargs with all the params, so we know what we asked for!
             h2o_glm.simpleCheckGLM(self, glm, None, **kwargs)
+            h2o.check_sandbox_for_errors()
             print "glm end on ", csvPathname, 'took', time.time() - start, 'seconds'
             print "Trial #", trial, "completed\n"
 

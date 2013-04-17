@@ -2,7 +2,7 @@ import unittest
 import random, sys
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd, h2o_rf
+import h2o, h2o_cmd, h2o_rf, h2o_hosts
 
 # we can pass ntree thru kwargs if we don't use the "trees" parameter in runRF
 # only classes 1-7 in the 55th col
@@ -15,27 +15,27 @@ paramDict = {
     'model_key': ['model_keyA', '012345', '__hello'],
     # UPDATE: H2O...OOBE has to be 0 for scoring
     'out_of_bag_error_estimate': [0],
-    'gini': [None, 0, 1],
+    'stat_type': [None, 'ENTROPY', 'GINI'],
     'depth': [None, 1,10,20,100],
     'bin_limit': [None,5,10,100,1000],
     'parallel': [None,0,1],
     'ignore': [None,0,1,2,3,4,5,6,7,8,9],
-    'sample': [None,20,40,60,80,100],
+    'sample': [None,20,40,60,80,90],
     'seed': [None,'0','1','11111','19823134','1231231'],
     # stack trace if we use more features than legal. dropped or redundanct cols reduce 
     # legal max also.
     # only 51 non-constant cols in the 20k covtype?
     'features': [None,1,3,5,7,9,11,13,17,19,23,37,51],
     'exclusive_split_limit': [None,0,3,5],
-    # 'stratify': [None,0,1,1,1,1,1,1,1,1,1],
-    'strata': [
+    'sampling_strategy': [None, 'RANDOM', 'STRATIFIED_LOCAL' ],
+    'strata_samples': [
         None,
-        "0:10",
-        "1:5",
-        "0:7,2:3",
-        "0:1,1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1",
-        "0:100,1:100,2:100,3:100,4:100,5:100,6:100,7:100,8:100,9:100",
-        "0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0",
+        "0=10",
+        "1=5",
+        "2=3",
+        "1=1,2=1,3=1,4=1,5=1,6=1,7=1",
+        "1=100,2=100,3=100,4=100,5=100,6=100,7=100",
+        "1=0,2=0,3=0,4=0,5=0,6=0,7=0",
         ]
     }
 
@@ -46,7 +46,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(node_count=1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=1)
+        else:
+            h2o_hosts.build_cloud_with_hosts(node_count=1)
 
     @classmethod
     def tearDownClass(cls):

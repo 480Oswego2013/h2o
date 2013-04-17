@@ -1,5 +1,5 @@
 import h2o_cmd, h2o
-import re, random
+import re, random, math
 
 def pickRandGlmParams(paramDict, params):
     colX = 0
@@ -33,7 +33,7 @@ def pickRandGlmParams(paramDict, params):
     return colX
 
 def simpleCheckGLM(self, glm, colX, allowFailWarning=False, allowZeroCoeff=False,
-    prettyPrint=False, **kwargs):
+    prettyPrint=False, noPrint=False, **kwargs):
     # h2o GLM will verboseprint the result and print errors. 
     # so don't have to do that
     # different when cross validation  is used? No trainingErrorDetails?
@@ -55,6 +55,9 @@ def simpleCheckGLM(self, glm, colX, allowFailWarning=False, allowZeroCoeff=False
                     # stop on other 'fail' warnings (are there any? fail to solve?
                     raise Exception(w)
 
+    # for key, value in glm.iteritems(): print key
+    # not in GLMGrid?
+    # print "computation_time:", glm['computation_time']
     print "GLMModel execution time (milliseconds):", GLMModel['time']
 
     # FIX! don't get GLMParams if it can't solve?
@@ -68,15 +71,47 @@ def simpleCheckGLM(self, glm, colX, allowFailWarning=False, allowZeroCoeff=False
     validationsList = GLMModel['validations']
     # don't want to modify validationsList in case someone else looks at it
     validations = validationsList[0]
+
+    # xval. compare what we asked for and what we got.
+    n_folds = kwargs.setdefault('n_folds', None)
+    if not 'xval_models' in validations:
+        if n_folds > 1:
+                raise Exception("No cross validation models returned. Asked for "+n_folds)
+    else:
+        xval_models = validations['xval_models']
+        if n_folds and n_folds > 1:
+            if len(xval_models) != n_folds:
+                raise Exception(len(xval_models)+" cross validation models returned. Asked for "+n_folds)
+        else:
+            # should be default 10?
+            if len(xval_models) != 10:
+                raise Exception(str(len(xval_models))+" cross validation models returned. Default should be 10")
+
+    if math.isnan(validations['err']):
+        emsg = "Why is this err = 'nan'?? %6s %s" % ("err:\t", validations['err'])
+        raise Exception(emsg)
+
+    if math.isnan(validations['resDev']):
+        emsg = "Why is this resDev = 'nan'?? %6s %s" % ("resDev:\t", validations['resDev'])
+        raise Exception(emsg)
+
+    if math.isnan(validations['nullDev']):
+        emsg = "Why is this nullDev = 'nan'?? %6s %s" % ("nullDev:\t", validations['nullDev'])
+        raise Exception(emsg)
+
     print "GLMModel/validations"
     print "%15s %s" % ("err:\t", validations['err'])
-    print "%15s %s" % ("auc:\t", validations['auc'])
     print "%15s %s" % ("nullDev:\t", validations['nullDev'])
     print "%15s %s" % ("resDev:\t", validations['resDev'])
 
     # threshold only there if binomial?
+    # auc only for binomial
     if family=="binomial":
+        print "%15s %s" % ("auc:\t", validations['auc'])
         print "%15s %s" % ("threshold:\t", validations['threshold'])
+
+    if family=="poisson" or family=="gaussian":
+        print "%15s %s" % ("aic:\t", validations['aic'])
 
     # get a copy, so we don't destroy the original when we pop the intercept
     coefficients = GLMModel['coefficients'].copy()
@@ -124,7 +159,10 @@ def simpleCheckGLM(self, glm, colX, allowFailWarning=False, allowZeroCoeff=False
         print "\nH2O intercept:\t\t%.5e" % intercept
         print cString
     else:
-        print "\nintercept:", intercept, cString
+        if not noPrint:
+            print "\nintercept:", intercept, cString
+
+    print "\nTotal # of coefficients:", len(column_names)
 
     # pick out the coefficent for the column we enabled for enhanced checking. Can be None.
     # FIX! temporary hack to deal with disappearing/renaming columns in GLM
@@ -189,10 +227,11 @@ def compareToFirstGlm(self, key, glm, firstglm):
         firstkList = [firstglm[key]]
 
     for k, firstk in zip(kList, firstkList):
-        delta = .1 * float(firstk)
+        # delta must be a positive number ?
+        delta = .1 * abs(float(firstk))
         msg = "Too large a delta (" + str(delta) + ") comparing current and first for: " + key
         self.assertAlmostEqual(float(k), float(firstk), delta=delta, msg=msg)
-        self.assertGreaterEqual(float(k), 0.0, str(k) + " not >= 0.0 in current")
+        self.assertGreaterEqual(abs(float(k)), 0.0, str(k) + " abs not >= 0.0 in current")
 
 
 def simpleCheckGLMGrid(self, glmGridResult, colX=None, allowFailWarning=False, **kwargs):
@@ -201,15 +240,15 @@ def simpleCheckGLMGrid(self, glmGridResult, colX=None, allowFailWarning=False, *
     h2o.verboseprint("Inspect of destination_key", destination_key,":\n", h2o.dump_json(inspectGG))
 
     # FIX! currently this is all unparsed!
-    type = inspectGG['type']
-    if 'unparsed' in type:
-        print "Warning: GLM Grid result destination_key is unparsed, can't interpret. Ignoring for now"
-        print "Run with -b arg to look at the browser output, for minimal checking of result"
+    #type = inspectGG['type']
+    #if 'unparsed' in type:
+    #    print "Warning: GLM Grid result destination_key is unparsed, can't interpret. Ignoring for now"
+    #    print "Run with -b arg to look at the browser output, for minimal checking of result"
 
     ### cols = inspectGG['cols']
     response = inspectGG['response'] # dict
     ### rows = inspectGG['rows']
-    value_size_bytes = inspectGG['value_size_bytes']
+    #value_size_bytes = inspectGG['value_size_bytes']
 
     model0 = glmGridResult['models'][0]
     alpha = model0['alpha']

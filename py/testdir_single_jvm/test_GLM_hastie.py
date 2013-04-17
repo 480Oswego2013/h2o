@@ -12,15 +12,15 @@
 
 import os, json, unittest, time, shutil, sys
 sys.path.extend(['.','..','py'])
-import h2o, h2o_cmd, h2o_glm, h2o_util
+import h2o, h2o_cmd, h2o_glm, h2o_util, h2o_hosts
 import copy
 
 def glm_doit(self, csvFilename, csvPathname, timeoutSecs=30):
     print "\nStarting GLM of", csvFilename
-    parseKey = h2o_cmd.parseFile(csvPathname=csvPathname, key2=csvFilename + ".hex", timeoutSecs=10)
+    parseKey = h2o_cmd.parseFile(csvPathname=csvPathname, key2=csvFilename + ".hex", timeoutSecs=30)
     y = "10"
     x = ""
-    # Took num_cross_validation_folds out, because GLM doesn't include num_cross_validation_folds time and it's slow
+    # Took n_folds out, because GLM doesn't include n_folds time and it's slow
     # wanted to compare GLM time to my measured time
     # hastie has two values 1,-1. need to specify case
     kwargs = {'x': x, 'y':  y, 'case': -1, 'thresholds': 0.5}
@@ -50,7 +50,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(1)
+        else:
+            h2o_hosts.build_cloud_with_hosts(1)
         global SYNDATASETS_DIR
         SYNDATASETS_DIR = h2o.make_syn_dir()
 

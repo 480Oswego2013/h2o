@@ -1,15 +1,14 @@
 package water;
 
-import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryMXBean;
-import java.lang.management.MemoryNotificationInfo;
-import java.lang.management.MemoryPoolMXBean;
-import java.lang.management.MemoryType;
+import java.lang.management.*;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.management.Notification;
 import javax.management.NotificationEmitter;
+
+import jsr166y.ForkJoinPool;
+import jsr166y.ForkJoinPool.ManagedBlocker;
 
 /**
  * Manages memory assigned to key/value pairs. All byte arrays used in
@@ -45,6 +44,61 @@ public abstract class MemoryManager {
 
   // max heap memory
   static final long MEM_MAX = Runtime.getRuntime().maxMemory();
+
+  // Memory available for tasks (we assume 3/4 of the heap is available for tasks)
+  static final AtomicLong _taskMem = new AtomicLong(MEM_MAX-(MEM_MAX>>2));
+
+  /**
+   * Try to reserve memory needed for task execution and return true if succeeded.
+   * Tasks have a shared pool of memory which they should ask for in advance before they even try to allocate it.
+   *
+   * This method is another backpressure mechanism to make sure we do not exhaust system's resources by running too many tasks at the same time.
+   * Tasks are expected to reserve memory before proceeding with their execution and making sure they release it when done.
+   *
+   * @param m - requested number of bytes
+   * @return true if there is enough free memory
+   */
+  public static boolean tryReserveTaskMem(long m){
+    if(!CAN_ALLOC)return false;
+    assert m >= 0:"m < 0: " + m;
+    long current = _taskMem.addAndGet(-m);
+    if(current < 0){
+      current = _taskMem.addAndGet(m);
+      return false;
+    }
+    return true;
+  }
+  private static Object _taskMemLock = new Object();
+  public static void reserveTaskMem(long m){
+    final long bytes = m;
+    while(!tryReserveTaskMem(bytes)){
+      try {
+        ForkJoinPool.managedBlock(new ManagedBlocker() {
+          @Override
+          public boolean isReleasable() {return _taskMem.get() >= bytes;}
+          @Override
+          public boolean block() throws InterruptedException {
+            synchronized(_taskMemLock){
+              try {_taskMemLock.wait();} catch( InterruptedException e ) {}
+            }
+            return isReleasable();
+          }
+        });
+      } catch (InterruptedException e){throw new Error(e);}
+    }
+  }
+
+  /**
+   * Free the memory successfully reserved by task.
+   * @param m
+   */
+  public static void freeTaskMem(long m){
+    if(m == 0)return;
+    _taskMem.addAndGet(m);
+    synchronized(_taskMemLock){
+      _taskMemLock.notifyAll();
+    }
+  }
 
   // Callbacks from GC
   static final HeapUsageMonitor HEAP_USAGE_MONITOR = new HeapUsageMonitor();
@@ -83,15 +137,18 @@ public abstract class MemoryManager {
     }
   }
 
+  public static void set_goals( String msg, boolean oom){
+    set_goals(msg, oom, 0);
+  }
   // Set K/V cache goals.
   // Allow (or disallow) allocations.
   // Called from the Cleaner, when "cacheUsed" has changed significantly.
   // Called from any FullGC notification, and HEAP/POJO_USED changed.
   // Called on any OOM allocation
-  public static void set_goals( String msg, boolean oom ) {
+  public static void set_goals( String msg, boolean oom , long bytes) {
     // Our best guess of free memory, as of the last GC cycle
     long freeHeap = MEM_MAX - HEAP_USED_AT_LAST_GC;
-    assert freeHeap >= 0 : "I am really confused about the heap usage";
+    assert freeHeap >= 0 : "I am really confused about the heap usage; MEM_MAX="+MEM_MAX+" HEAP_USED_AT_LAST_GC="+HEAP_USED_AT_LAST_GC;
     // Current memory held in the K/V store.
     long cacheUsage = myHisto.histo(false)._cached;
 
@@ -109,7 +166,7 @@ public abstract class MemoryManager {
     long age = (System.currentTimeMillis() - TIME_AT_LAST_GC); // Age since last FullGC
     age = Math.min(age,10*60*1000 ); // Clip at 10mins
     while( (age-=5000) > 0 ) p = p-(p>>3); // Decay effective POJO by 1/8th every 5sec
-    d -= 2*p; // Allow for the effective POJO, and again to throttle GC rate
+    d -= 2*p - bytes; // Allow for the effective POJO, and again to throttle GC rate
     d = Math.max(d,MEM_MAX>>3); // Keep at least 1/8th heap
     H2O.Cleaner.DESIRED = d;
 
@@ -122,7 +179,7 @@ public abstract class MemoryManager {
                            ", MAX="+(MEM_MAX>>20)+"M"+
                            ", DESIRED="+(H2O.Cleaner.DESIRED>>20)+"M");
       }
-      setMemLow(); // Stop allocations; trigger emergency clean
+      if( oom ) setMemLow(); // Stop allocations; trigger emergency clean
       H2O.kick_store_cleaner();
     } else { // Else we are not *emergency* cleaning, but may be lazily cleaning.
       if( H2O.Cleaner.VERBOSE && !CAN_ALLOC )
@@ -132,7 +189,7 @@ public abstract class MemoryManager {
                            ", MAX="+(MEM_MAX>>20)+"M"+
                            ", DESIRED="+(H2O.Cleaner.DESIRED>>20)+"M");
       setMemGood();
-      assert !oom; // Confused? OOM should have FullGCd should have set low-mem goals
+      assert !oom:"MEM_MAX = " + MEM_MAX + ", DESIRED = " + d +", CACHE = " + cacheUsage + ", p = " + p + ", bytes = " + bytes; // Confused? OOM should have FullGCd should have set low-mem goals
     }
   }
 
@@ -222,8 +279,11 @@ public abstract class MemoryManager {
         default: throw H2O.unimpl();
         }
       }
-      catch( OutOfMemoryError e ) { }
-      set_goals("OOM",true); // Low memory; block for swapping
+      catch( OutOfMemoryError e ) {
+        if( H2O.Cleaner.isDiskFull() )
+          UDPRebooted.suicide(UDPRebooted.T.oom, H2O.SELF);
+      }
+      set_goals("OOM",true, bytes); // Low memory; block for swapping
     }
   }
 

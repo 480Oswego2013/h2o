@@ -2,13 +2,13 @@ import unittest
 import random, sys, time
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd, h2o_glm
+import h2o, h2o_cmd, h2o_glm, h2o_hosts
 
 def define_params():
     paramDict = {
         'x': [0,1,15,33,34],
         'family': ['gaussian'],
-        'num_cross_validation_folds': [2,3,4,9,15],
+        'n_folds': [2,3,4,9,15],
         'thresholds': [0.1, 0.5, 0.7, 0.9],
         'lambda': [1e-8, 1e-4],
         'alpha': [0,0.5,0.75],
@@ -28,7 +28,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(node_count=1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=1)
+        else:
+            h2o_hosts.build_cloud_with_hosts(node_count=1)
 
     @classmethod
     def tearDownClass(cls):
@@ -48,7 +53,7 @@ class Basic(unittest.TestCase):
         paramDict = define_params()
         for trial in range(20):
             # params is mutable. This is default.
-            params = {'y': 54, 'num_cross_validation_folds': 3, 'family': "gaussian", 'alpha': 0.5, 'lambda': 1e-4, 'max_iter': 30}
+            params = {'y': 54, 'n_folds': 3, 'family': "gaussian", 'alpha': 0.5, 'lambda': 1e-4, 'max_iter': 30}
             colX = h2o_glm.pickRandGlmParams(paramDict, params)
             kwargs = params.copy()
 
@@ -56,10 +61,7 @@ class Basic(unittest.TestCase):
             glm = h2o_cmd.runGLMOnly(timeoutSecs=120, parseKey=parseKey, **kwargs)
             print "glm end on ", csvPathname, 'took', time.time() - start, 'seconds'
 
-            start = time.time()
             h2o_glm.simpleCheckGLM(self, glm, None, **kwargs)
-            print "simpleCheckGLM end on ", csvPathname, 'took', time.time() - start, 'seconds'
-
             print "Trial #", trial, "completed\n"
 
 

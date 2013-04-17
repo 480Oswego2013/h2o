@@ -17,7 +17,6 @@ def write_syn_dataset(csvPathname, rowCount, headerData, rowData):
 # append!
 def append_syn_dataset(csvPathname, rowData, num):
     with open(csvPathname, "a") as dsf:
-        print num
         for i in range(num):
             dsf.write(rowData + "\n")
 
@@ -38,7 +37,7 @@ class parse_rand_schmoo(unittest.TestCase):
     def setUpClass(cls):
         localhost = h2o.decide_if_localhost()
         if (localhost):
-            h2o.build_cloud(2,java_heap_GB=4,use_flatfile=True)
+            h2o.build_cloud(2,java_heap_MB=1300,use_flatfile=True)
         else:
             import h2o_hosts
             h2o_hosts.build_cloud_with_hosts()
@@ -66,22 +65,27 @@ class parse_rand_schmoo(unittest.TestCase):
         headerData = "ID,CAPSULE,AGE,RACE,DPROS,DCAPS,PSA,VOL,GLEASON"
 
         rowData = rand_rowData()
-        write_syn_dataset(csvPathname, 1000000, headerData, rowData)
+        totalRows = 1000000
+        write_syn_dataset(csvPathname, totalRows, headerData, rowData)
+
 
         print "This is the same format/data file used by test_same_parse, but the non-gzed version"
         print "\nSchmoo the # of rows"
-        for trial in range (500):
+        for trial in range (100):
 
             rowData = rand_rowData()
             num = random.randint(4096, 10096)
             append_syn_dataset(csvPathname, rowData, num)
+            totalRows += num
             start = time.time()
 
             # make sure all key names are unique, when we re-put and re-parse (h2o caching issues)
             key = csvFilename + "_" + str(trial)
             key2 = csvFilename + "_" + str(trial) + ".hex"
-            key = h2o_cmd.parseFile(csvPathname=csvPathname, key=key, key2=key2, timeoutSecs=15)
-            print "trial #", trial, "with num rows:", num, "parse end on ", csvFilename, \
+            # On EC2 once we get to 30 trials or so, do we see polling hang? GC or spill of heap or ??
+            key = h2o_cmd.parseFile(csvPathname=csvPathname, key=key, key2=key2, 
+                timeoutSecs=70, pollTimeoutSecs=60)
+            print "trial #", trial, "totalRows:", totalRows, "num:", num, "parse end on ", csvFilename, \
                 'took', time.time() - start, 'seconds'
             ### h2o_cmd.runInspect(key=key2)
             ### h2b.browseJsonHistoryAsUrlLastMatch("Inspect")

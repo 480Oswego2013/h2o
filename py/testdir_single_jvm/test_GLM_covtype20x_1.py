@@ -25,11 +25,11 @@ class Basic(unittest.TestCase):
     def test_poisson_covtype20x(self):
         if localhost:
             csvFilenameList = [
-                ('covtype20x.data', 200),
+                ('covtype20x.data', 400),
                 ]
         else:
             csvFilenameList = [
-                ('covtype20x.data', 200),
+                ('covtype20x.data', 400),
                 ('covtype200x.data', 2000),
                 ]
 
@@ -65,11 +65,11 @@ class Basic(unittest.TestCase):
                 'y': y, 
                 'family': 'binomial',
                 'link': 'logit',
-                'num_cross_validation_folds': 0, 
+                'n_folds': 0, 
                 'case_mode': '=', 
                 'case': 1, 
                 'max_iter': max_iter, 
-                'beta_eps': 1e-3}
+                'beta_epsilon': 1e-3}
 
             # L2 
             kwargs.update({'alpha': 0, 'lambda': 0})

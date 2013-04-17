@@ -47,10 +47,10 @@ paramDict = {
     'family': ['binomial'],
     'lambda': [1.0E-5],
     'alpha': [1.0],
-    'max_iter': [50],
+    'max_iter': [20],
     'weight': [1.0],
     'thresholds': [0.5],
-    'num_cross_validation_folds': [2],
+    'n_folds': [0],
     'beta_epsilon': [1.0E-4],
     }
 
@@ -67,7 +67,7 @@ class test_GLM_prob_cols_4(unittest.TestCase):
         print "\nUsing random seed:", SEED
         localhost = h2o.decide_if_localhost()
         if (localhost):
-            h2o.build_cloud(2,java_heap_GB=7,use_flatfile=True)
+            h2o.build_cloud(2,java_heap_GB=5,use_flatfile=True)
         else:
             h2o_hosts.build_cloud_with_hosts()
 
@@ -80,7 +80,8 @@ class test_GLM_prob_cols_4(unittest.TestCase):
         translateList = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u']
         tryList = [
             (7919,  53, 'cA', 600),
-            (2659,  1049, 'cB', 600),
+            # translated to enums, 4 per col, so don't go above 2k effective cols or too slow!
+            (2659,  400, 'cB', 600),
             ]
 
         ### h2b.browseTheCloud()
@@ -107,7 +108,7 @@ class test_GLM_prob_cols_4(unittest.TestCase):
                 paramDict2[k] = paramDict[k][0]
 
             y = colCount
-            kwargs = {'y': y, 'max_iter': 50}
+            kwargs = {'y': y, 'max_iter': 20}
             kwargs.update(paramDict2)
 
             start = time.time()

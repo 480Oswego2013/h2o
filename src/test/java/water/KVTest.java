@@ -8,7 +8,6 @@ import hex.LinearRegression;
 import java.io.File;
 import org.junit.*;
 import water.parser.ParseDataset;
-import water.util.TestUtil;
 
 public class KVTest extends TestUtil {
 
@@ -69,18 +68,19 @@ public class KVTest extends TestUtil {
       Value val = new Value(k,bits);
       DKV.put(k,val);
     }
+    DKV.write_barrier();
 
     RemoteBitSet r = new RemoteBitSet();
     r.invoke(keys);
     assertEquals((int)((1L<<keys.length)-1), r._x);
-    for( Key k : keys ) UKV.remove(k);
+    for( Key k : keys ) DKV.remove(k);
   }
 
   // Remote Bit Set: OR together the result of a single bit-mask where the
   // shift-amount is passed in in the Key.
   public static class RemoteBitSet extends MRTask {
     private int _x;
-    public void map( Key key ) { _x = 1<<(DKV.get(key).get()[0]); }
+    public void map( Key key ) { _x = 1<<(DKV.get(key).memOrLoad()[0]); }
     public void reduce( DRemoteTask rbs ) { _x |= ((RemoteBitSet)rbs)._x; }
   }
 
@@ -133,7 +133,7 @@ public class KVTest extends TestUtil {
     public void map( Key key ) {
       _x = new int[256];        // One-time set histogram array
       Value val = DKV.get(key); // Get the Value for the Key
-      byte[] bits = val.get();  // Compute local histogram
+      byte[] bits = val.memOrLoad();  // Compute local histogram
       for( int i=0; i<bits.length; i++ )
         _x[bits[i]&0xFF]++;
     }
@@ -167,14 +167,15 @@ public class KVTest extends TestUtil {
     q.invoke(key);              // Run remotely; block till done
     Value val3 = DKV.get(key);
     assertNotSame(v1,val3);
-    AutoBuffer ab = new AutoBuffer(val3.get());
+    AutoBuffer ab = new AutoBuffer(val3.memOrLoad());
     assertEquals(2,ab.get8(0));
     assertEquals(2,ab.get8(8));
     DKV.remove(key);            // Cleanup after test
   }
   
   public static class Atomic2 extends Atomic {
-    @Override public byte[] atomic( byte[] bits1 ) {
+    @Override public Value atomic( Value val ) {
+      byte[] bits1 = val.memOrLoad();
       long l1 = UDP.get8(bits1,0);
       long l2 = UDP.get8(bits1,8);
       l1 += 2;
@@ -182,7 +183,7 @@ public class KVTest extends TestUtil {
       byte[] bits2 = new byte[16];
       UDP.set8(bits2,0,l1);
       UDP.set8(bits2,8,l2);
-      return bits2;
+      return new Value(_key,bits2);
     }
   }
   
@@ -191,9 +192,9 @@ public class KVTest extends TestUtil {
   @Test public void testLinearRegression() {
     Key fkey = load_test_file("smalldata/cars.csv");
     Key okey = Key.make("cars.hex");
-    ParseDataset.parse(okey,DKV.get(fkey));
+    ParseDataset.parse(okey,new Key[]{fkey});
     UKV.remove(fkey);
-    ValueArray va = ValueArray.value(DKV.get(okey));
+    ValueArray va = DKV.get(okey).get();
     // Compute LinearRegression between columns 2 & 3
     JsonObject res = LinearRegression.run(va,2,3);
     assertEquals( 58.326241377521995, res.get("Beta1"      ).getAsDouble(), 0.000001);

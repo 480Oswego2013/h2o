@@ -1,7 +1,7 @@
 import os, json, unittest, time, shutil, sys
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd
+import h2o, h2o_cmd, h2o_hosts
 
 class Basic(unittest.TestCase):
     def tearDown(self):
@@ -9,7 +9,11 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(node_count=3)
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(3)
+        else:
+            h2o_hosts.build_cloud_with_hosts()
 
     @classmethod
     def tearDownClass(cls):
@@ -39,7 +43,7 @@ class Basic(unittest.TestCase):
             parseKey = h2o_cmd.parseFile(None, csvPathname)
 
             h2o.verboseprint("Trial", trial)
-            h2o_cmd.runRFOnly(parseKey=parseKey, trees=237, depth=45, timeoutSecs=30)
+            h2o_cmd.runRFOnly(parseKey=parseKey, trees=237, depth=45, timeoutSecs=120)
 
             # don't change tree count yet
             ## trees += 10

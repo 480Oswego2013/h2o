@@ -92,7 +92,7 @@ class Basic(unittest.TestCase):
         print "\nUsing random seed:", SEED
         localhost = h2o.decide_if_localhost()
         if (localhost):
-            h2o.build_cloud(1,java_heap_GB=28)
+            h2o.build_cloud(1,java_heap_GB=10)
         else:
             h2o_hosts.build_cloud_with_hosts()
 
@@ -137,7 +137,7 @@ class Basic(unittest.TestCase):
                     'weight': 1.0,
                     # what about these?
                     # 'link': [None, 'logit','identity', 'log', 'inverse'],
-                    'num_cross_validation_folds': 3,
+                    'n_folds': 3,
                     'beta_epsilon': 1e-4,
                     'thresholds': 0.5,
                     }

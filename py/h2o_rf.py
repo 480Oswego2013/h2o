@@ -3,6 +3,7 @@ import h2o_cmd
 import random
 import time
 
+# params is mutable here
 def pickRandRfParams(paramDict, params):
     colX = 0
     randomGroupSize = random.randint(1,len(paramDict))
@@ -10,15 +11,16 @@ def pickRandRfParams(paramDict, params):
         randomKey = random.choice(paramDict.keys())
         randomV = paramDict[randomKey]
         randomValue = random.choice(randomV)
+        # note it updates params, so any default values will still be there
         params[randomKey] = randomValue
         if (randomKey=='x'):
             colX = randomValue
         # temp hack to avoid CM=0 results if 100% sample and using OOBEE
-        if 'sample' in params and params['sample']==100:
-            params['out_of_bag_error_estimate'] = 0
+        # UPDATE: if the default is oobe=1, it might not be in params...just have to not have the
+        # test ask for 100
     return colX
 
-def simpleCheckRFView(node, rfv, **kwargs):
+def simpleCheckRFView(node, rfv, noPrint=False, **kwargs):
     if not node:
         node = h2o.nodes[0]
 
@@ -26,7 +28,7 @@ def simpleCheckRFView(node, rfv, **kwargs):
         warnings = rfv['warnings']
         # catch the 'Failed to converge" for now
         for w in warnings:
-            print "\nwarning:", w
+            if not noPrint: print "\nwarning:", w
             if ('Failed' in w) or ('failed' in w):
                 raise Exception(w)
 
@@ -37,18 +39,15 @@ def simpleCheckRFView(node, rfv, **kwargs):
     # the simple assigns will at least check the key exists
     cm = rfv['confusion_matrix']
     header = cm['header'] # list
-
     classification_error = cm['classification_error']
-    print "classification_error:", classification_error
-
     rows_skipped = cm['rows_skipped']
-    print "rows_skipped:", rows_skipped
-
     cm_type = cm['type']
-    print "type:", cm_type
+    if not noPrint: 
+        print "classification_error * 100 (pct):", classification_error * 100
+        print "rows_skipped:", rows_skipped
+        print "type:", cm_type
 
     used_trees = cm['used_trees']
-    ### print "used_trees:", used_trees
     if (used_trees <= 0):
         raise Exception("used_trees should be >0. used_trees:", used_trees)
 
@@ -59,10 +58,48 @@ def simpleCheckRFView(node, rfv, **kwargs):
 
     scoresList = cm['scores'] # list
     totalScores = 0
+    totalRight = 0
     # individual scores can be all 0 if nothing for that output class
     # due to sampling
-    for s in scoresList:
-        totalScores += sum(s)
+    classErrorPctList = []
+    predictedClassDict = {} # may be missing some? so need a dict?
+    for classIndex,s in enumerate(scoresList):
+        classSum = sum(s)
+        if classSum == 0 :
+            # why would the number of scores for a class be 0? does RF CM have entries for non-existent classes
+            # in a range??..in any case, tolerate. (it shows up in test.py on poker100)
+            if not noPrint: print "class:", classIndex, "classSum", classSum, "<- why 0?"
+        else:
+            # H2O should really give me this since it's in the browser, but it doesn't
+            classRightPct = ((s[classIndex] + 0.0)/classSum) * 100
+            totalRight += s[classIndex]
+            classErrorPct = 100 - classRightPct
+            classErrorPctList.append(classErrorPct)
+            ### print "s:", s, "classIndex:", classIndex
+            if not noPrint: print "class:", classIndex, "classSum", classSum, "classErrorPct:", "%4.2f" % classErrorPct
+
+            # gather info for prediction summary
+            for pIndex,p in enumerate(s):
+                if pIndex not in predictedClassDict:
+                    predictedClassDict[pIndex] = p
+                else:
+                    predictedClassDict[pIndex] += p
+
+        totalScores += classSum
+
+    if not noPrint: 
+        print "Predicted summary:"
+        # FIX! Not sure why we weren't working with a list..hack with dict for now
+        for predictedClass,p in predictedClassDict.items():
+            print str(predictedClass)+":", p
+
+        # this should equal the num rows in the dataset if full scoring? (minus any NAs)
+        print "totalScores:", totalScores
+        print "totalRight:", totalRight
+        pctRight = 100.0 * totalRight/totalScores
+        print "pctRight:", "%5.2f" % pctRight
+        print "pctWrong:", "%5.2f" % (100 - pctRight)
+
     if (totalScores<=0 or totalScores>5e9):
         raise Exception("scores in RFView seems wrong. scores:", scoresList)
 
@@ -94,7 +131,6 @@ def simpleCheckRFView(node, rfv, **kwargs):
     if (number_built<=0 or number_built>20000):
         raise Exception("number_built in RFView seems wrong. number_built:", number_built)
 
-
     h2o.verboseprint("RFView response: number_built:", number_built, "leaves:", leaves, "depth:", depth)
 
     # just touching these keys to make sure they're good?
@@ -105,7 +141,7 @@ def simpleCheckRFView(node, rfv, **kwargs):
     ### modelInspect = node.inspect(model_key)
     dataInspect = node.inspect(data_key)
 
-    return classification_error
+    return (classification_error, classErrorPctList, totalScores)
 
 def trainRF(trainParseKey, **kwargs):
     # Train RF
@@ -124,7 +160,9 @@ def scoreRF(scoreParseKey, trainResult, **kwargs):
     ntree       = trainResult['ntree']
     
     start = time.time()
-    scoreResult = h2o_cmd.runRFView(modelKey=rfModelKey, parseKey=scoreParseKey, ntree=ntree, **kwargs)
+    data_key = scoreParseKey['destination_key']
+    scoreResult = h2o_cmd.runRFView(None, data_key, rfModelKey, ntree, **kwargs)
+
     rftime      = time.time()-start 
     h2o.verboseprint("RF score results: ", scoreResult)
     h2o.verboseprint("RF computation took {0} sec".format(rftime))
@@ -135,7 +173,10 @@ def scoreRF(scoreParseKey, trainResult, **kwargs):
 def pp_rf_result(rf):
     jcm = rf['confusion_matrix']
     header = jcm['header']
-    cm = ' '.join(header)
+    #cm = '   '.join(header)
+    cm = '{0:<15}'.format('')
+    for h in header: cm = '{0}|{1:<15}'.format(cm, h)
+    cm = '{0}|{1:<15}'.format(cm, 'error')
     c = 0
     for line in jcm['scores']:
         lineSum  = sum(line)
@@ -144,7 +185,10 @@ def pp_rf_result(rf):
             err = float(errorSum) / lineSum
         else:
             err = 0.0
-        cm = "{0}\n {1} {2} {3}".format(cm, header[c], ' '.join(map(str,line)), err)
+        fl = '{0:<15}'.format(header[c])
+        for num in line: fl = '{0}|{1:<15}'.format(fl, num)
+        fl = '{0}|{1:<15}'.format(fl, err)
+        cm = "{0}\n{1}".format(cm, fl)
         c += 1
 
     return """
@@ -156,7 +200,7 @@ def pp_rf_result(rf):
    Time: {9} seconds
 
    Confusion matrix:
-      {10}
+{10}
 """.format(
         rf['trees']['leaves']['min'],
         rf['trees']['leaves']['mean'],

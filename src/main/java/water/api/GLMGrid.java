@@ -7,9 +7,11 @@ import hex.DGLM.GLMParams;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Properties;
 
-import water.*;
+import water.Key;
+import water.ValueArray;
 import water.util.RString;
 
 import com.google.gson.JsonObject;
@@ -109,37 +111,27 @@ public class GLMGrid extends Request {
   // ---
   // Make a new Grid Search object.
   @Override protected Response serve() {
-    // The "task key" for this Grid search.  Used to track job progress, to
-    // shutdown early, to collect best-so-far & grid results, etc.  Pinned to
-    // self, because it's almost always updated locally.
-    Key taskey = Key.make("Task"+UUID.randomUUID().toString(),(byte)0,Key.TASK,H2O.SELF);
-
     GLMParams glmp = new GLMParams(_family.value());
     glmp._betaEps = _betaEps.value();
     glmp._maxIter = _maxIter.value();
     glmp._caseMode = _caseMode.valid()?_caseMode.value():CaseMode.none;
     glmp._caseVal = _case.valid()?_case.value():Double.NaN;
-
-    GLMGridStatus task =
-      new GLMGridStatus(taskey,       // Self/status/task key
+    Key dest = Key.make();
+    double [] ts = glmp._family == Family.binomial?_thresholds.value()._arr:null;
+    hex.GLMGrid job = new hex.GLMGrid(dest,
                         _key.value(), // Hex data
                         glmp,
                         getCols(_x.value(), _y.value()),
                         _lambda.value()._arr, // Grid ranges
                         _alpha.value()._arr,  // Grid ranges
-                        _thresholds.value()._arr,
+                        ts,
                         _xval.value());
-
-    // Put the task Out There for all to find
-    UKV.put(taskey,task);
-    // Start the grid search
-    assert task._working == true;
-    H2O.FJP_NORM.submit(task);
+    job.start();
 
     // Redirect to the grid-search status page
     JsonObject j = new JsonObject();
-    j.addProperty(Constants.DEST_KEY, taskey.toString());
-    Response r = GLMGridProgress.redirect(j, taskey);
+    j.addProperty(Constants.DEST_KEY, dest.toString());
+    Response r = GLMGridProgress.redirect(j, job.self(), dest);
     r.setBuilder(Constants.DEST_KEY, new KeyElementBuilder());
     return r;
   }
@@ -155,6 +147,8 @@ public class GLMGrid extends Request {
   }
 
   public static String link(GLMModel m, String content) {
+    int [] colIds = m.selectedColumns();
+    if(colIds == null)return ""; // the dataset is not in H2O any more
     RString rs = new RString("<a href='GLMGrid.query?%key_param=%$key&y=%ycol&x=%xcols&caseMode=%caseMode&case=%case'>%content</a>");
     rs.replace("key_param", KEY);
     rs.replace("key", m._dataKey.toString());
@@ -162,7 +156,10 @@ public class GLMGrid extends Request {
     rs.replace("ycol",m.responseName());
     rs.replace("case",m._glmParams._caseVal);
     try {
-      rs.replace("xcols",URLEncoder.encode(m.xcolNames(),"utf8"));
+      StringBuilder sb = new StringBuilder(""+colIds[0]);
+      for(int i = 1; i < colIds.length-1; ++i)
+        sb.append(","+colIds[i]);
+      rs.replace("xcols",sb.toString());
       rs.replace("caseMode",URLEncoder.encode(m._glmParams._caseMode.toString(),"utf8"));
     } catch( UnsupportedEncodingException e ) {
       throw new RuntimeException(e);

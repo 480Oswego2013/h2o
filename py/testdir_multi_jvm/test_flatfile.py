@@ -2,7 +2,7 @@ import os, json, unittest, time, shutil, sys
 sys.path.extend(['.','..','py'])
 
 import h2o_cmd
-import h2o
+import h2o, h2o_hosts
 
 class Basic(unittest.TestCase):
     def tearDown(self):
@@ -12,7 +12,11 @@ class Basic(unittest.TestCase):
     def setUpClass(cls):
         # done in build_cloud now
         ### h2o.write_flatfile(node_count=3)
-        h2o.build_cloud(node_count=3,use_flatfile=True)
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=3,use_flatfile=True)
+        else:
+            h2o_hosts.build_cloud_with_hosts()
 
     @classmethod
     def tearDownClass(cls):

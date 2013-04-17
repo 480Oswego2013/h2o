@@ -2,7 +2,7 @@ import unittest
 import random, sys, time
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd, h2o_rf as h2f
+import h2o, h2o_cmd, h2o_rf as h2f, h2o_hosts
 
 # we can pass ntree thru kwargs if we don't use the "trees" parameter in runRF
 # only classes 1-7 in the 55th col
@@ -14,7 +14,7 @@ paramDict = {
     # 'ntree': 200,
     'model_key': 'model_keyA',
     'out_of_bag_error_estimate': 0,
-    'gini': 1,
+    'stat_type': 'GINI',
     'depth': 2147483647, 
     'bin_limit': 10000,
     'parallel': 1,
@@ -32,7 +32,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(node_count=1, java_heap_GB=14)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=1, java_heap_GB=10)
+        else:
+            h2o_hosts.build_cloud_with_hosts(node_count=1, java_heap_GB=10)
 
     @classmethod
     def tearDownClass(cls):
@@ -50,7 +55,7 @@ class Basic(unittest.TestCase):
             kwargs = paramDict
             # adjust timeoutSecs with the number of trees
             # seems ec2 can be really slow
-            timeoutSecs = 30 + kwargs['ntree'] * 10
+            timeoutSecs = 30 + kwargs['ntree'] * 20
             start = time.time()
             rfView = h2o_cmd.runRF(csvPathname=csvPathname, timeoutSecs=timeoutSecs, **kwargs)
             elapsed = time.time() - start

@@ -35,7 +35,7 @@ paramDict = {
     'max_iter': [50],
     'weight': [1.0],
     'threshold': [0.4],
-    'num_cross_validation_folds': [1],
+    'n_folds': [1],
     'beta_epsilon': [1.0E-4],
     }
 
@@ -91,7 +91,7 @@ class Basic(unittest.TestCase):
             print "\nCreating random", csvPathname
             write_syn_dataset(csvPathname, rowCount, colCount, SEEDPERFILE)
 
-            parseKey = h2o_cmd.parseFile(None, csvPathname, key2=key2, timeoutSecs=10)
+            parseKey = h2o_cmd.parseFile(None, csvPathname, key2=key2, timeoutSecs=30)
             print csvFilename, 'parse time:', parseKey['response']['time']
             print "\nParse result['destination_key']:", parseKey['destination_key']
 

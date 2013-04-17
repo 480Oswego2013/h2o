@@ -14,8 +14,12 @@ class Basic(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # assume we're at 0xdata with it's hdfs namenode
-        h2o.build_cloud(1,use_hdfs=True, 
-            hdfs_version='cdh3u5', hdfs_name_node='192.168.1.176')
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(1, use_hdfs=True, hdfs_version='cdh3u5', hdfs_name_node='192.168.1.176')
+        else:
+            h2o_hosts.build_cloud_with_hosts(1, use_hdfs=True, hdfs_version='cdh3u5', hdfs_name_node='192.168.1.176')
 
     @classmethod
     def tearDownClass(cls):
@@ -33,16 +37,17 @@ class Basic(unittest.TestCase):
             "and-testing.data",
             "arcene2_train.both",
             "arcene_train.both",
-            "bestbuy_test.csv",
-            "bestbuy_train.csv",
+            # these can't RF ..output classes not integer?
+            # "bestbuy_test.csv",
+            # "bestbuy_train.csv",
             "covtype.data",
             "covtype.4x.shuffle.data",
             "covtype4x.shuffle.data",
             "covtype.13x.data",
             "covtype.13x.shuffle.data",
-            "covtype.169x.data",
-            "prostate_2g.csv",
-            "prostate_long.csv.gz",
+            # "covtype.169x.data",
+            # "prostate_2g.csv",
+            # "prostate_long.csv.gz",
             "prostate_long_1G.csv",
             "hhp.unbalanced.012.1x11.data.gz",
             "hhp.unbalanced.012.data.gz",
@@ -50,10 +55,10 @@ class Basic(unittest.TestCase):
             "hhp2.os.noisy.0_1.data",
             "hhp2.os.noisy.9_4.data",
             "hhp_9_14_12.data",
-            "poker_c1s1_testing_refresh.csv",
-            "3G_poker_shuffle",
-            "billion_rows.csv.gz",
-            "poker-hand.1244M.shuffled311M.full.txt",
+            # "poker_c1s1_testing_refresh.csv",
+            # "3G_poker_shuffle",
+            # "billion_rows.csv.gz",
+            # "poker-hand.1244M.shuffled311M.full.txt",
         ]
 
         # pick 8 randomly!

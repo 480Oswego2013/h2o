@@ -40,7 +40,7 @@ paramDict = {
     'max_iter': [50],
     'weight': [1.0],
     'thresholds': [0.5],
-    'num_cross_validation_folds': [2],
+    'n_folds': [2],
     'beta_epsilon': [1.0E-4],
     }
 
@@ -57,7 +57,7 @@ class Basic(unittest.TestCase):
         print "\nUsing random seed:", SEED
         localhost = h2o.decide_if_localhost()
         if (localhost):
-            h2o.build_cloud(2,java_heap_GB=7,use_flatfile=True)
+            h2o.build_cloud(2,java_heap_GB=5,use_flatfile=True)
         else:
             h2o_hosts.build_cloud_with_hosts()
 

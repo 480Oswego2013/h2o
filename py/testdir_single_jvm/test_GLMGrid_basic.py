@@ -1,6 +1,6 @@
 import os, json, unittest, time, shutil, sys
 sys.path.extend(['.','..','py'])
-import h2o, h2o_cmd, h2o_glm
+import h2o, h2o_cmd, h2o_glm, h2o_hosts
 
 class Basic(unittest.TestCase):
     def tearDown(self):
@@ -9,14 +9,19 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(1)
+        else:
+            h2o_hosts.build_cloud_with_hosts(1)
 
     @classmethod
     def tearDownClass(cls):
         ## time.sleep(3600)
         h2o.tear_down_cloud()
 
-    def test_B_benign(self):
+    def test_GLMGrid_basic_benign(self):
         csvFilename = "benign.csv"
         print "\nStarting", csvFilename 
         csvPathname = h2o.find_file('smalldata/logreg' + '/' + csvFilename)
@@ -25,39 +30,32 @@ class Basic(unittest.TestCase):
         # cols 0-13. 3 is output
         # no member id in this one
         y = "3"
-        xList = []  
-        for appendx in xrange(14):
-            if (appendx == 0): 
-                print "\nSkipping 0. Causes coefficient of 0 when used alone"
-            elif (appendx == 3): 
-                print "\n3 is output."
-            else:
-                xList.append(appendx)
-
-        x = ','.join(map(str, xList))
+        x = range(14)
+        x.remove(0) # 0. skipping causes coefficient of 0 when used alone
+        x.remove(3) # 3 is output
+        x = ','.join(map(str, x))
 
         # just run the test with all x, not the intermediate results
         print "\nx:", x
         print "y:", y
         
         kwargs = {
-            'x': x, 'y':  y, 'num_cross_validation_folds': 0, 
+            'x': x, 'y':  y, 'n_folds': 0, 
             'lambda': '1e-8:1e-2:100', 
             'alpha': '0,0.5,1',
             'thresholds': '0:1:0.01'
             }
-        # fails with num_cross_validation_folds
-        print "Not doing num_cross_validation_folds with benign. Fails with 'unable to solve?'"
+        # fails with n_folds
+        print "Not doing n_folds with benign. Fails with 'unable to solve?'"
 
         gg = h2o_cmd.runGLMGridOnly(parseKey=parseKey, timeoutSecs=120, **kwargs)
         # check the first in the models list. It should be the best
         colNames = [ 'STR','OBS','AGMT','FNDX','HIGD','DEG','CHK',
                      'AGP1','AGMN','NLV','LIV','WT','AGLP','MST' ]
 
-        # h2o_glm.simpleCheckGLMGrid(self, gg, colNames[xList[-1]], **kwargs)
         h2o_glm.simpleCheckGLMGrid(self, gg, None, **kwargs)
 
-    def test_C_prostate(self):
+    def test_GLMGrid_basic_prostate(self):
         csvFilename = "prostate.csv"
         print "\nStarting", csvFilename
         # columns start at 0
@@ -65,16 +63,11 @@ class Basic(unittest.TestCase):
         parseKey = h2o_cmd.parseFile(csvPathname=csvPathname, key2=csvFilename + ".hex")
 
         y = "1"
-        xList = []  
-        for appendx in xrange(9):
-            if (appendx == 0):
-                print "\n0 is member ID. not used"
-            elif (appendx == 1):
-                print "\n1 is output."
-            else:
-                xList.append(appendx)
+        x = range(9)
+        x.remove(0) # 0. member ID. not used.
+        x.remove(1) # 1 is output
+        x = ','.join(map(str, x))
 
-        x = ','.join(map(str, xList))
         # just run the test with all x, not the intermediate results
         print "\nx:", x
         print "y:", y
@@ -84,7 +77,7 @@ class Basic(unittest.TestCase):
         # colon separated is min/max/step
         # FIX! have to update other GLMGrid tests
         kwargs = {
-            'x': x, 'y':  y, 'num_cross_validation_folds': 2, 
+            'x': x, 'y':  y, 'n_folds': 2, 
             'beta_epsilon': 1e-4,
             'lambda': '1e-8:1e3:100', 
             'alpha': '0,0.5,1',

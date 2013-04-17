@@ -36,7 +36,7 @@ class Basic(unittest.TestCase):
         print "\nUsing random seed:", SEED
         localhost = h2o.decide_if_localhost()
         if (localhost):
-            h2o.build_cloud(1,java_heap_GB=28)
+            h2o.build_cloud(1,java_heap_GB=10)
         else:
             h2o_hosts.build_cloud_with_hosts()
 
@@ -79,7 +79,7 @@ class Basic(unittest.TestCase):
             print "\n" + csvFilename
 
             y = colCount
-            kwargs = {'y': y, 'max_iter': 50, 'num_cross_validation_folds': 3, 'alpha': 0.2, 'lambda': 1e-5}
+            kwargs = {'y': y, 'max_iter': 50, 'n_folds': 3, 'alpha': 0.2, 'lambda': 1e-5}
             start = time.time()
             glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, **kwargs)
             print "glm end on ", csvPathname, 'took', time.time() - start, 'seconds'

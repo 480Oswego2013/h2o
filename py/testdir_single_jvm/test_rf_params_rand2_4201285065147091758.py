@@ -2,7 +2,7 @@ import unittest
 import random, sys
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd, h2o_rf
+import h2o, h2o_cmd, h2o_rf, h2o_hosts
 
 # make a dict of lists, with some legal choices for each. None means no value.
 # assume poker1000 datset
@@ -18,14 +18,14 @@ paramDict = {
     'ntree': [1,3,7,23],
     'model_key': ['model_keyA', '012345', '__hello'],
     'out_of_bag_error_estimate': [None,0,1],
-    'gini': [None, 0, 1],
+    'stat_type': [None, 'ENTROPY', 'GINI'],
     'depth': [None, 1,10,20,100],
     'bin_limit': [None,4,5,10,100,1000],
     'parallel': [None,0,1],
     'ignore': [None,0,1,2,3,4,5,6,7,8,9],
-    'sample': [None,20,40,60,80,100],
+    'sample': [None,20,40,60,80,90],
     'seed': [None,'0','1','11111','19823134','1231231'],
-    'features': [None,1,3,5,7,9,11,13,17,19,23,37,53],
+    'features': [1,3,5,7,9,11,13,17,19,23,37,53],
     'exclusive_split_limit': [None,0,3,5],
     }
 
@@ -35,7 +35,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(node_count=1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=1, java_heap_GB=10)
+        else:
+            h2o_hosts.build_cloud_with_hosts(node_count=1, java_heap_GB=10)
 
     @classmethod
     def tearDownClass(cls):
@@ -49,13 +54,13 @@ class Basic(unittest.TestCase):
         SEED = 4201285065147091758
         random.seed(SEED)
         print "\nUsing random seed:", SEED
-        for trial in range(20):
+        for trial in range(10):
             # params is mutable. This is default.
-            params = {'ntree': 13, 'parallel': 1}
+            params = {'ntree': 13, 'parallel': 1, 'features': 7}
             colX = h2o_rf.pickRandRfParams(paramDict, params)
             kwargs = params.copy()
             # adjust timeoutSecs with the number of trees
-            timeoutSecs = 30 + kwargs['ntree'] * 10 * (kwargs['parallel'] and 1 or 3)
+            timeoutSecs = 30 + ((kwargs['ntree']*20) * max(1,kwargs['features']/15) * (kwargs['parallel'] and 1 or 3))
             h2o_cmd.runRF(timeoutSecs=timeoutSecs, csvPathname=csvPathname, **kwargs)
             print "Trial #", trial, "completed"
 

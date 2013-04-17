@@ -12,7 +12,12 @@ class Basic(unittest.TestCase):
     def setUpClass(cls):
         global SYNDATASETS_DIR
         SYNDATASETS_DIR = h2o.make_syn_dir()
-        h2o.build_cloud(node_count=1) 
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=1) 
+        else:
+            h2o_hosts.build_cloud_with_hosts(node_count=1) 
 
     @classmethod 
     def tearDownClass(cls): 
@@ -161,10 +166,12 @@ class Basic(unittest.TestCase):
         # what about case of missing eoll at end of file?
     
     sepChangeDict = {
-        0:"  ", # double space
-        1:" ",
-        2:",",
-        3:"\t",
+        # NEW: Hive datasets use 0x01 hex char as SEP, so now legal in our parser spec
+        0:"",
+        1:"  ", # double space
+        2:" ",
+        3:",",
+        4:"\t",
         }
     
     def changeSep(self,rows,sepCase):

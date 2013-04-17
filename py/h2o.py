@@ -2,11 +2,16 @@ import time, os, json, signal, tempfile, shutil, datetime, inspect, threading, o
 import requests, psutil, argparse, sys, unittest
 import glob
 import h2o_browse as h2b
+import h2o_perf
+
 import re
 import webbrowser
 import random
 # used in shutil.rmtree permission hack for windows
 import errno
+# use to unencode the urls sent to h2o?
+import urlparse
+import logging
 
 # For checking ports in use, using netstat thru a subprocess.
 from subprocess import Popen, PIPE
@@ -38,9 +43,6 @@ def drain(src, dst):
     t.daemon = True
     t.start()
 
-# jenkins gets this assign, but not the unit_main one?
-python_test_name = inspect.stack()[1][1]
-
 def unit_main():
     global python_test_name
     python_test_name = inspect.stack()[1][1]
@@ -61,6 +63,8 @@ ipaddr = None
 config_json = None
 debugger = False
 random_udp_drop = False
+# jenkins gets this assign, but not the unit_main one?
+python_test_name = inspect.stack()[1][1]
 
 def parse_our_args():
     parser = argparse.ArgumentParser()
@@ -71,7 +75,7 @@ def parse_our_args():
     parser.add_argument('-ip', '--ip', type=str, help='IP address to use for single host H2O with psutil control')
     parser.add_argument('-cj', '--config_json', help='Use this json format file to provide multi-host defaults. Overrides the default file pytest_config-<username>.json. These are used only if you do build_cloud_with_hosts()')
     parser.add_argument('-dbg', '--debugger', help='Launch java processes with java debug attach mechanisms', action='store_true')
-    parser.add_argument('-rud', '--random_udp_drop', help='Drop 10% of the UDP packets at the receive side', action='store_true')
+    parser.add_argument('-rud', '--random_udp_drop', help='Drop 20 pct. of the UDP packets at the receive side', action='store_true')
     parser.add_argument('unittest_args', nargs='*')
 
     args = parser.parse_args()
@@ -88,7 +92,9 @@ def parse_our_args():
     # Set sys.argv to the unittest args (leav sys.argv[0] as is)
     # FIX! this isn't working to grab the args we don't care about
     # Pass "--failfast" to stop on first error to unittest. and -v
+    # won't get this for jenkins, since it doesn't do parse_our_args
     sys.argv[1:] = ['-v', "--failfast"] + args.unittest_args
+    # sys.argv[1:] = args.unittest_args
 
 def verboseprint(*args, **kwargs):
     if verbose:
@@ -130,7 +136,6 @@ def get_file_size(f):
 def iter_chunked_file(file, chunk_size=2048):
     return iter(lambda: file.read(chunk_size), '')
 
-
 # shutil.rmtree doesn't work on windows if the files are read only.
 # On unix the parent dir has to not be readonly too.
 # May still be issues with owner being different, like if 'system' is the guy running?
@@ -142,7 +147,7 @@ def handleRemoveError(func, path, exc):
     # Wait a bit before retrying. Ignore errors on the retry. Just leave files.
     # Ex. if we're in the looping cloud test deleting sandbox.
     excvalue = exc[1]
-    print "Retrying shutil.rmtree of sandbox after 2 secs. Will ignore errors. exception was", excvalue.errno
+    print "Retrying shutil.rmtree of sandbox (2 sec delay). Will ignore errors. Exception was", excvalue.errno
     time.sleep(2)
     try:
         func(path)
@@ -182,7 +187,10 @@ def tmp_dir(prefix='', suffix=''):
 def log(cmd, comment=None):
     with open(LOG_DIR + '/commands.log', 'a') as f:
         f.write(str(datetime.datetime.now()) + ' -- ')
-        f.write(cmd)
+        # what got sent to h2o
+        # f.write(cmd)
+        # let's try saving the unencoded url instead..human readable
+        f.write(urlparse.unquote(cmd))
         if comment:
             f.write('    #')
             f.write(comment)
@@ -208,6 +216,7 @@ def get_ip_address():
 
     import socket
     ip = '127.0.0.1'
+    # this method doesn't work if vpn is enabled..it gets the vpn ip
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8',0))
@@ -219,6 +228,16 @@ def get_ip_address():
     if ip.startswith('127'):
         ip = socket.getaddrinfo(socket.gethostname(), None)[0][4][0]
         verboseprint("get_ip case 3:", ip)
+
+    ipa = None
+    for ips in socket.gethostbyname_ex(socket.gethostname())[2]:
+         # only take the first 
+         if ipa is None and not ips.startswith("127."):
+            ipa = ips[:]
+            verboseprint("get_ip case 4:", ipa)
+            if ip != ipa:
+                print "\nAssuming", ip, "is the ip address h2o will use but", ipa, "is probably the real ip?"
+                print "You might have a vpn active. Best to use '-ip "+ipa+"' to get python and h2o the same."
 
     verboseprint("get_ip_address:", ip) 
     return ip
@@ -287,26 +306,24 @@ def write_flatfile(node_count=2, base_port=54321, hosts=None, rand_shuffle=True)
 
 
 def check_port_group(base_port):
-    # UPDATE: don't do this any more
     # for now, only check for jenkins or kevin
-    if (1==0):
+    if (1==1):
         username = getpass.getuser()
         if username=='jenkins' or username=='kevin' or username=='michal':
             # assumes you want to know about 3 ports starting at base_port
             command1Split = ['netstat', '-anp']
             command2Split = ['egrep']
             # colon so only match ports. space at end? so no submatches
-            command2Split.append("(%s | %s | %s)" % (base_port, base_port+1, base_port+2) )
+            command2Split.append("(%s | %s)" % (base_port, base_port+1) )
             command3Split = ['wc','-l']
 
-            print "Checking 3 ports starting at ", base_port
+            print "Checking 2 ports starting at ", base_port
             print ' '.join(command2Split)
 
             # use netstat thru subprocess
             p1 = Popen(command1Split, stdout=PIPE)
             p2 = Popen(command2Split, stdin=p1.stdout, stdout=PIPE)
-            p3 = Popen(command3Split, stdin=p2.stdout, stdout=PIPE)
-            output = p3.communicate()[0]
+            output = p2.communicate()[0]
             print output
 
 def default_hosts_file():
@@ -316,17 +333,17 @@ def default_hosts_file():
 def decide_if_localhost():
     # First, look for local hosts file
     hostsFile = default_hosts_file()
-    if os.path.exists(hostsFile): 
-        verboseprint("* Using config JSON file {0}.".format(hostsFile))
-        return False
     if config_json:
-        verboseprint("* Using config JSON:", config_json)
+        print "* Using config JSON you passed as -cj argument:", config_json
+        return False
+    if os.path.exists(hostsFile): 
+        print "* Using matching username config JSON file discovered in this directory: {0}.".format(hostsFile)
         return False
     if 'hosts' in os.getcwd():
-        verboseprint("* Using the username's config json")
+        print "Since you're in a *hosts* directory, we're using a config json"
+        print "* Expecting default username's config json here. Better exist!"
         return False
-    verboseprint( "Launching local cloud...")
-
+    print "No config json used. Launching local cloud..."
     return True
 
 # node_count is per host if hosts is specified.
@@ -334,6 +351,14 @@ def build_cloud(node_count=2, base_port=54321, hosts=None,
         timeoutSecs=30, retryDelaySecs=0.5, cleanup=True, rand_shuffle=True, **kwargs):
     # moved to here from unit_main. so will run with nosetests too!
     clean_sandbox()
+    # keep this param in kwargs, because we pass to the H2O node build, so state
+    # is created that polling and other normal things can check, to decide to dump 
+    # info to benchmark.log
+    if kwargs.setdefault('enable_benchmark_log', False):
+        # an object to keep stuff out of h2o.py        
+        global cloudPerfH2O
+        cloudPerfH2O = h2o_perf.PerfH2O(python_test_name)
+
     ports_per_node = 2 
     node_list = []
     try:
@@ -371,8 +396,6 @@ def build_cloud(node_count=2, base_port=54321, hosts=None,
                 newNode = h.remote_h2o(port=p, node_id=totalNodes, **kwargs)
                 node_list.append(newNode)
                 totalNodes += 1
-                # kbn try delay between each one?
-                ### time.sleep(1)
 
         verboseprint("Attempting Cloud stabilize of", totalNodes, "nodes on", hostCount, "hosts")
         start = time.time()
@@ -401,13 +424,14 @@ def build_cloud(node_count=2, base_port=54321, hosts=None,
 
     # this is just in case they don't assign the return to the nodes global?
     nodes[:] = node_list
+    print len(node_list), "total jvms in H2O cloud"
     return node_list
 
 def upload_jar_to_remote_hosts(hosts, slow_connection=False):
     def prog(sofar, total):
         # output is bad for jenkins. 
-        # ok to turn this off for all cases where we don't want a browser
-        if not browse_disable:
+        username = getpass.getuser()
+        if username!='jenkins':
             p = int(10.0 * sofar / total)
             sys.stdout.write('\rUploading jar [%s%s] %02d%%' % ('#'*p, ' '*(10-p), 100*sofar/total))
             sys.stdout.flush()
@@ -427,7 +451,9 @@ def upload_jar_to_remote_hosts(hosts, slow_connection=False):
         hosts[0].upload_file(f, progress=prog)
         hosts[0].push_file_to_remotes(f, hosts[1:])
 
-def check_sandbox_for_errors():
+def check_sandbox_for_errors(sandbox_ignore_errors=False):
+    if not os.path.exists(LOG_DIR):
+        return
     # dont' have both tearDown and tearDownClass report the same found error
     # only need the first
     if nodes and nodes[0].sandbox_error_report():
@@ -451,6 +477,10 @@ def check_sandbox_for_errors():
             regex2 = re.compile('Caused',re.IGNORECASE)
             regex3 = re.compile('warn|info', re.IGNORECASE)
 
+            # there are many hdfs/apache messages with error in the text. treat as warning if they have '[WARN]'
+            # i.e. they start with:
+            # [WARN]
+
             # if we started due to "warning" ...then if we hit exception, we don't want to stop
             # we want that to act like a new beginning. Maybe just treat "warning" and "info" as
             # single line events? that's better
@@ -460,7 +490,6 @@ def check_sandbox_for_errors():
                 # JIT reporting looks like this..don't detect that as an error
                 printSingleWarning = False
                 foundBad = False
-                foundNOPTaskCnt = 0
                 if not ' bytes)' in line:
                     # no multiline FSM on this 
                     printSingleWarning = regex3.search(line) and not ('[Loaded ' in line)
@@ -468,7 +497,8 @@ def check_sandbox_for_errors():
 
                     # don't detect these class loader info messags as errors
                     #[Loaded java.lang.Error from /usr/lib/jvm/java-7-oracle/jre/lib/rt.jar]
-                    foundBad = regex1.search(line) and not (('error rate' in line) or ('[Loaded ' in line))
+                    foundBad = regex1.search(line) and not (
+                        ('error rate' in line) or ('[Loaded ' in line) or ('[WARN]' in line))
 
                 if (printing==0 and foundBad):
                     printing = 1
@@ -485,13 +515,7 @@ def check_sandbox_for_errors():
                     # Update: Assertion can be followed by Exception. 
                     # Make sure we keep printing for a min of 4 lines
                     foundAt = re.match(r'[\t ]+at ',line)
-                    # on the NOPTask stack trace, we get two Assertion errors and would like to see them both
-                    # looks like min of 10 lines looks like it will cover it
-                    # but also maybe just count NOPTask
-                    if re.match(r'NOPTask',line):
-                        foundNOPTaskCnt += 1
-
-                    if foundBad and (lines>10) and not (foundCaused or foundAt or foundNOPTaskCnt==1):
+                    if foundBad and (lines>10) and not (foundCaused or foundAt):
                         printing = 2 
 
                 if (printing==1):
@@ -505,6 +529,7 @@ def check_sandbox_for_errors():
                         sys.stdout.write(line)
 
             sandFile.close()
+    sys.stdout.flush()
 
     # already has \n in each line
     # doing this kludge to put multiple line message in the python traceback, 
@@ -514,22 +539,36 @@ def check_sandbox_for_errors():
     # we probably could have a tearDown with the test rather than the class, but we
     # would have to update all tests. 
     if len(errLines)!=0:
-        emsg1 = " check_sandbox_for_errors: Errors in sandbox stdout or stderr.\n" + \
-                 "Could have occurred at any prior time\n\n"
-        emsg2 = "".join(errLines)
-        if nodes: 
-            nodes[0].sandbox_error_report(True)
-        raise Exception(python_test_name + emsg1 + emsg2)
+        # check if the lines all start with INFO: or have "apache" in them
+        justInfo = True
+        for e in errLines:
+            justInfo &= re.match("INFO:", e) or ("apache" in e)
 
+        if not justInfo:
+            emsg1 = " check_sandbox_for_errors: Errors in sandbox stdout or stderr.\n" + \
+                     "Could have occurred at any prior time\n\n"
+            emsg2 = "".join(errLines)
+            if nodes: 
+                nodes[0].sandbox_error_report(True)
 
-def tear_down_cloud(node_list=None):
+            # can build a cloud that ignores all sandbox things that normally fatal the test
+            # kludge, test will set this directly if it wants, rather than thru build_cloud
+            # parameter. 
+            # we need the sandbox_ignore_errors, for the test teardown_cloud..the state 
+            # disappears!
+            if sandbox_ignore_errors or (nodes and nodes[0].sandbox_ignore_errors):
+                pass
+            else:
+                raise Exception(python_test_name + emsg1 + emsg2)
+
+def tear_down_cloud(node_list=None, sandbox_ignore_errors=False):
     if not node_list: node_list = nodes
     try:
         for n in node_list:
             n.terminate()
             verboseprint("tear_down_cloud n:", n)
     finally:
-        check_sandbox_for_errors()
+        check_sandbox_for_errors(sandbox_ignore_errors=sandbox_ignore_errors)
         node_list[:] = []
 
 # don't need any more? 
@@ -584,7 +623,7 @@ def stabilize_cloud(node, node_count, timeoutSecs=14.0, retryDelaySecs=0.25):
                 "\n" +
                 "\nUPDATE: building cloud size of 2 with 127.0.0.1 may temporarily report 3 incorrectly, with no zombie?" 
                 )
-            # raise Exception(emsg)
+            raise Exception(emsg)
             print emsg
 
         
@@ -615,13 +654,16 @@ class H2O(object):
 
         # fatal if no response
         if not r: 
-            raise Exception('no r in __check_request %s in %s:' % (e, inspect.stack()[1][3]))
+            raise Exception("Maybe bad url? no r in __check_request %s in %s:" % (e, inspect.stack()[1][3]))
 
         # this is used to open a browser on results, or to redo the operation in the browser
         # we don't' have that may urls flying around, so let's keep them all
         json_url_history.append(r.url)
-
+        if not r.json():
+            raise Exception("Maybe bad url? no r.json in __check_request %s in %s:" % (e, inspect.stack()[1][3]))
+            
         rjson = r.json()
+
         for e in ['error', 'Error', 'errors', 'Errors']:
             if e in rjson:
                 verboseprint(dump_json(rjson))
@@ -633,8 +675,8 @@ class H2O(object):
                     raise Exception(emsg)
 
         for w in ['warning', 'Warning', 'warnings', 'Warnings']:
-            verboseprint(dump_json(rjson))
             if w in rjson:
+                verboseprint(dump_json(rjson))
                 print 'rjson %s in %s: %s' % (w, inspect.stack()[1][3], rjson[w])
 
         return rjson
@@ -708,25 +750,32 @@ class H2O(object):
     # no noise if None
     def poll_url(self, response, 
         timeoutSecs=10, retryDelaySecs=0.5, initialDelaySecs=None, pollTimeoutSecs=15,
-        noise=None):
+        noise=None, benchmarkLogging=None, noPoll=False):
+        ### print "poll_url: pollTimeoutSecs", pollTimeoutSecs 
         verboseprint('poll_url input: response:', dump_json(response))
 
         url = self.__url(response['redirect_request'])
         params = response['redirect_request_args']
 
         if noise is not None:
+            print noise
             # noise_json should be like "Storeview"
             (noise_json, noiseParams) = noise
             noiseUrl = self.__url(noise_json + ".json")
 
         status = 'poll'
+        r = {} # response
+
         start = time.time()
         count = 0
         # FIX! temporarily wait 5x the retryDelaySecs delay, before the first poll
         # Progress status NPE issue (H2O)
         if initialDelaySecs:
             time.sleep(initialDelaySecs)
+
         # can end with status = 'redirect' or 'done'
+        # FIX! temporary hack ...if a GLMModel key shows up, treat that as "stop polling'   
+        # because we have results for GLm. (i.e. ignore status.
         while status == 'poll':
             # UPDATE: 1/24/13 change to always wait before the first poll..
             # see if it makes a diff to our low rate fails
@@ -765,21 +814,34 @@ class H2O(object):
             if ((time.time()-start)>timeoutSecs):
                 # show what we're polling with 
                 argsStr =  '&'.join(['%s=%s' % (k,v) for (k,v) in paramsUsed.items()])
-                emsg = "Timeout: %d secs while polling. status: %s, url: %s?%s" % (timeoutSecs, status, urlUsed, argsStr)
+                emsg = "Exceeded timeoutSecs: %d secs while polling." % timeoutSecs +\
+                       "status: %s, url: %s?%s" % (status, urlUsed, argsStr)
                 raise Exception(emsg)
             count += 1
+
+            if noPoll:
+                return r
+            # GLM can return partial results during polling..that's legal
+            ### if 'GLMProgressPage' in urlUsed and 'GLMModel' in r:
+            ###    print "INFO: GLM returning partial results during polling. Continuing.."
+
+            if benchmarkLogging:
+                cloudPerfH2O.get_log_save(benchmarkLogging)
+
         return r
     
-    # additional params include: cols=. don't need to include in params_dict it doesn't need a default
-    def kmeans(self, key, key2=None, timeoutSecs=10, retryDelaySecs=0.2, **kwargs):
+    # additional params include: cols=. 
+    # don't need to include in params_dict it doesn't need a default
+    def kmeans(self, key, key2=None, 
+        timeoutSecs=300, retryDelaySecs=0.2, initialDelaySecs=None, pollTimeoutSecs=30,
+        **kwargs):
+        # defaults
         params_dict = {
             'epsilon': 1e-6,
             'k': 1,
             'source_key': key,
             'destination_key': None,
             }
-        # alternate name, to match what parse has
-        # don't really need this, maybe better if tests all use 'destination_key'
         if key2 is not None: params_dict['destination_key'] = key2
         params_dict.update(kwargs)
         print "\nKMeans params list", params_dict
@@ -793,28 +855,35 @@ class H2O(object):
         if a['response']['redirect_request']!='Progress':
             print dump_json(a)
             raise Exception('H2O kmeans redirect is not Progress. KMeans json response precedes.')
-        a = self.poll_url(a['response'], timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs)
+        a = self.poll_url(a['response'],
+            timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs, 
+            initialDelaySecs=initialDelaySecs, pollTimeoutSecs=pollTimeoutSecs)
         verboseprint("\nKMeans result:", dump_json(a))
         return a
 
     # params: header=1, 
     # noise is a 2-tuple: ("StoreView",params_dict)
     def parse(self, key, key2=None, 
-        timeoutSecs=300, retryDelaySecs=0.2, initialDelaySecs=None, pollTimeoutSecs=15,
-        noPoll=False, **kwargs):
+        timeoutSecs=300, retryDelaySecs=0.2, initialDelaySecs=None, pollTimeoutSecs=30,
+        noise=None, benchmarkLogging=False, noPoll=False, **kwargs):
         browseAlso = kwargs.pop('browseAlso',False)
         # this doesn't work. webforums indicate max_retries might be 0 already? (as of 3 months ago)
         # requests.defaults({max_retries : 4})
         # https://github.com/kennethreitz/requests/issues/719
         # it was closed saying Requests doesn't do retries. (documentation implies otherwise)
         verboseprint("\nParsing key:", key, "to key2:", key2, "(if None, means default)")
-        # FIX! noted that H2O will stack trace if dst key = src key. maybe H2O should detect that.
+
+        # other h2o parse parameters, not in the defauls
+        # header
+        # exclude
         params_dict = {
-            'source_key': key,
+            'source_key': key, # can be a regex
             'destination_key': key2,
             }
         params_dict.update(kwargs)
-        noise = kwargs.pop('noise', None)
+
+        if benchmarkLogging:
+            cloudPerfH2O.get_save()
 
         a = self.__check_request(
             requests.get(
@@ -828,18 +897,17 @@ class H2O(object):
             raise Exception('H2O parse redirect is not Progress. Parse json response precedes.')
 
         if noPoll:
-            # don't wait for response! might have H2O throughput issues if send them back to back a lot?
-            return None
-        else:
-            # noise is a 2-tuple ("StoreView, none) for url plus args for doing during poll to create noise
-            # no noise if None
-            verboseprint('Parse.Json noise:', noise)
-            a = self.poll_url(a['response'],
-                timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs, 
-                initialDelaySecs=initialDelaySecs, pollTimeoutSecs=pollTimeoutSecs,
-                noise=noise)
-            verboseprint("\nParse result:", dump_json(a))
             return a
+
+        # noise is a 2-tuple ("StoreView, none) for url plus args for doing during poll to create noise
+        # no noise if None
+        verboseprint('Parse.Json noise:', noise)
+        a = self.poll_url(a['response'],
+            timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs, 
+            initialDelaySecs=initialDelaySecs, pollTimeoutSecs=pollTimeoutSecs,
+            noise=noise, benchmarkLogging=benchmarkLogging)
+        verboseprint("\nParse result:", dump_json(a))
+        return a
 
     def netstat(self):
         return self.__check_request(requests.get(self.__url('Network.json')))
@@ -865,9 +933,17 @@ class H2O(object):
     # FIX! what params does this take
     def store_view(self):
         a = self.__check_request(requests.get(self.__url('StoreView.json'),
-            params={
-                })
-            )
+            params={}))
+        # too much!
+        ### verboseprint("\ninspect result:", dump_json(a))
+        return a
+
+    # There is also a RemoveAck in the browser, that asks for confirmation from
+    # the user. This is after that confirmation.
+    def remove_key(self, key):
+        a = self.__check_request(requests.get(self.__url('Remove.json'),
+            params={"key": key}))
+
         # too much!
         ### verboseprint("\ninspect result:", dump_json(a))
         return a
@@ -882,8 +958,7 @@ class H2O(object):
     # ImportFiles replaces ImportFolder, with a param that can be a folder or a file.
     # the param name is 'file', but it can take a directory or a file.
     # 192.168.0.37:54323/ImportFiles.html?file=%2Fhome%2F0xdiag%2Fdatasets
-
-    # this can be used to import just a file or a whole folder
+    # Can import just a file or a whole folder
     def import_files(self, path):
         a = self.__check_request(requests.get(
             self.__url('ImportFiles.json'),
@@ -891,7 +966,7 @@ class H2O(object):
         verboseprint("\nimport_files result:", dump_json(a))
         return a
 
-    def import_s3(self, bucket, repl=None):
+    def import_s3(self, bucket):
         a = self.__check_request(requests.get(
             self.__url('ImportS3.json'),
             params={"bucket": bucket}))
@@ -920,16 +995,50 @@ class H2O(object):
         verboseprint("\nexec_query result:", dump_json(a))
         return a
 
+    def jobs_admin(self, timeoutSecs=20, **kwargs):
+        params_dict = {
+            # 'expression': None,
+            }
+        browseAlso = kwargs.pop('browseAlso',False)
+        params_dict.update(kwargs)
+        verboseprint("\nexec_query:", params_dict)
+        a = self.__check_request(requests.get(
+            url=self.__url('Jobs.json'),
+            timeout=timeoutSecs,
+            params=params_dict))
+        verboseprint("\njobs_admin result:", dump_json(a))
+        return a
+
+    def jobs_cancel(self, timeoutSecs=20, **kwargs):
+        params_dict = {
+            # 'expression': None,
+            }
+        browseAlso = kwargs.pop('browseAlso',False)
+        params_dict.update(kwargs)
+        verboseprint("\nexec_query:", params_dict)
+        a = self.__check_request(requests.get(
+            url=self.__url('Cancel.json'),
+            timeout=timeoutSecs,
+            params=params_dict))
+        verboseprint("\njobs_cancel result:", dump_json(a))
+        return a
+
+
     # note ntree in kwargs can overwrite trees! (trees is legacy param)
-    def random_forest(self, data_key, trees, timeoutSecs=300, **kwargs):
+    def random_forest(self, data_key, trees, timeoutSecs=300, print_params=True, **kwargs):
         params_dict = {
             'data_key': data_key,
             'ntree':  trees,
             'model_key': 'pytest_model',
+            # new default. h2o defaults to 0, better for tracking oobe problems
+            'out_of_bag_error_estimate': 1, 
             }
         browseAlso = kwargs.pop('browseAlso',False)
         params_dict.update(kwargs)
-        print "\nrandom_forest parameters:", params_dict
+
+        if print_params:
+            print "\nrandom_forest parameters:", params_dict
+
         a = self.__check_request(requests.get(
             url=self.__url('RF.json'),
             timeout=timeoutSecs,
@@ -943,7 +1052,7 @@ class H2O(object):
         params_dict = {
             'data_key': data_key,
             'model_key': model_key,
-            'out_of_bag_error_estimate': None,
+            'out_of_bag_error_estimate': 1, 
             'class_weights': None,
             'response_variable': None, # FIX! apparently this is needed now?
             }
@@ -993,7 +1102,10 @@ class H2O(object):
         return a
 
     # kwargs used to pass many params
-    def GLM_shared(self, key, timeoutSecs=300, retryDelaySecs=0.5, parentName=None, **kwargs):
+    def GLM_shared(self, key, 
+        timeoutSecs=300, retryDelaySecs=0.5, initialDelaySecs=None, pollTimeoutSecs=30,
+        parentName=None, **kwargs):
+
         browseAlso = kwargs.pop('browseAlso',False)
         params_dict = { 
             'family': 'binomial',
@@ -1001,7 +1113,6 @@ class H2O(object):
             'y': 1,
             'link': 'familyDefault'
         }
-
         params_dict.update(kwargs)
         print "\nGLM params list", params_dict
 
@@ -1013,29 +1124,48 @@ class H2O(object):
         verboseprint(parentName, dump_json(a))
         return a 
 
-    def GLM(self, key, timeoutSecs=300, retryDelaySecs=0.5, **kwargs):
-        a = self.GLM_shared(key, timeoutSecs, retryDelaySecs, parentName="GLM", **kwargs)
+    def GLM(self, key, 
+        timeoutSecs=300, retryDelaySecs=0.5, initialDelaySecs=None, pollTimeoutSecs=30, 
+        noise=None, noPoll=False, **kwargs):
+
+        a = self.GLM_shared(key, timeoutSecs, retryDelaySecs, initialDelaySecs, parentName="GLM", **kwargs)
+        # Check that the response has the right Progress url it's going to steer us to.
+        if a['response']['redirect_request']!='GLMProgressPage':
+            print dump_json(a)
+            raise Exception('H2O GLM redirect is not GLMProgressPage. GLM json response precedes.')
+
+        if noPoll:
+            return a
+
+        a = self.poll_url(a['response'],
+            timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs, 
+            initialDelaySecs=initialDelaySecs, pollTimeoutSecs=pollTimeoutSecs, noise=noise)
+        verboseprint("GLM done:", dump_json(a))
 
         browseAlso = kwargs.get('browseAlso', False)
         if (browseAlso | browse_json):
-            print "Redoing the GLM through the browser, no results saved though"
-            h2b.browseJsonHistoryAsUrlLastMatch('GLM')
+            print "Viewing the GLM result through the browser"
+            h2b.browseJsonHistoryAsUrlLastMatch('GLMProgressPage')
             time.sleep(5)
         return a
 
     # this only exists in new. old will fail
-    def GLMGrid(self, key, timeoutSecs=300, retryDelaySecs=1.0, **kwargs):
-        a = self.GLM_shared(key, timeoutSecs, retryDelaySecs, parentName="GLMGrid", **kwargs)
+    def GLMGrid(self, key, 
+        timeoutSecs=300, retryDelaySecs=1.0, initialDelaySecs=None, pollTimeoutSecs=30,
+        noise=None, noPoll=False, **kwargs):
 
-        if kwargs.get('norm'):
-            # don't have to pop, GLMGrid ignores
-            print "\nWARNING: norm param is ignored by GLMGrid. Always uses LASSO (L1+L2)."
-
+        a = self.GLM_shared(key, timeoutSecs, retryDelaySecs, initialDelaySecs, parentName="GLMGrid", **kwargs)
         # Check that the response has the right Progress url it's going to steer us to.
         if a['response']['redirect_request']!='GLMGridProgress':
             print dump_json(a)
             raise Exception('H2O GLMGrid redirect is not GLMGridProgress. GLMGrid json response precedes.')
-        a = self.poll_url(a['response'], timeoutSecs, retryDelaySecs)
+
+        if noPoll:
+            return a
+
+        a = self.poll_url(a['response'],
+            timeoutSecs=timeoutSecs, retryDelaySecs=retryDelaySecs, 
+            initialDelaySecs=initialDelaySecs, pollTimeoutSecs=pollTimeoutSecs, noise=noise)
         verboseprint("GLMGrid done:", dump_json(a))
 
         browseAlso = kwargs.get('browseAlso', False)
@@ -1116,12 +1246,10 @@ class H2O(object):
                 n.get_cloud()
                 return True
             except requests.ConnectionError, e:
-                # verboseprint("Connection error", e, "during wait_for_node_to_accept_connections")
-
                 # Now using: requests 1.1.0 (easy_install --upgrade requests) 2/5/13
                 # Now: assume all requests.ConnectionErrors are H2O legal connection errors.
                 # Have trouble finding where the errno is, fine to assume all are good ones.
-                # remember: we have a timeout check that will kick in if continued H2O badness.
+                # Timeout check will kick in if continued H2O badness.
                 return False
 
         self.stabilize(test, 'Cloud accepting connections',
@@ -1147,6 +1275,12 @@ class H2O(object):
             args += [ '-Xms%dG' % self.java_heap_GB ]
             args += [ '-Xmx%dG' % self.java_heap_GB ]
 
+        if self.java_heap_MB is not None:
+            if (1 > self.java_heap_MB > 63000):
+                raise Exception('java_heap_MB <1 or >63000  (MB): %s' % (self.java_heap_MB))
+            args += [ '-Xms%dm' % self.java_heap_MB ]
+            args += [ '-Xmx%dm' % self.java_heap_MB ]
+
         if self.java_extra_args is not None:
             args += [ '%s' % self.java_extra_args ]
 
@@ -1157,7 +1291,7 @@ class H2O(object):
             entries = [ find_file('build/classes'), find_file('lib/javassist.jar') ] 
             entries += glob.glob(find_file('lib')+'/*/*.jar')
             entries += glob.glob(find_file('lib')+'/*/*/*.jar')
-            args += ['-classpath', os.pathsep.join(entries), 'H2OInit.Boot']
+            args += ['-classpath', os.pathsep.join(entries), 'water.Boot']
         else: 
             args += ["-jar", self.get_h2o_jar()]
 
@@ -1193,18 +1327,14 @@ class H2O(object):
         if self.use_hdfs:
             # NOTE: was leaving space. should work, but try =
             args += [
+                # it's fine if hdfs_name has a ":9000" port or something too
                 '-hdfs hdfs://' + self.hdfs_name_node,
                 '-hdfs_version=' + self.hdfs_version, 
-                '-hdfs_root=' + self.hdfs_root,
             ]
-            if self.hdfs_nopreload:
-                args += [
-                    '-hdfs_nopreload ' + self.hdfs_nopreload
-                ]
-            if self.hdfs_config:
-                args += [
-                    '-hdfs_config ' + self.hdfs_config
-                ]
+        if self.hdfs_config:
+            args += [
+                '-hdfs_config ' + self.hdfs_config
+            ]
 
         if not self.sigar:
             args += ['--nosigar']
@@ -1216,21 +1346,28 @@ class H2O(object):
         if self.random_udp_drop or random_udp_drop:
             args += ['--random_udp_drop']
 
+        if self.enable_h2o_log:
+            args += ['--log']
+
         return args
 
     def __init__(self, 
-        use_this_ip_addr=None, port=54321, capture_output=True, sigar=False, use_debugger=None, classpath=None,
-        use_hdfs=False, hdfs_root="/datasets", 
+        use_this_ip_addr=None, port=54321, capture_output=True, sigar=False, 
+        use_debugger=None, classpath=None,
+        use_hdfs=False, 
         # hdfs_version="cdh4", hdfs_name_node="192.168.1.151", 
         hdfs_version="cdh3u5", hdfs_name_node="192.168.1.176", 
         hdfs_config=None,
-        # FIX not interesting any more?
-        hdfs_nopreload=None, 
         aws_credentials=None,
-        use_flatfile=False, java_heap_GB=None, java_extra_args=None, 
+        use_flatfile=False, java_heap_GB=None, java_heap_MB=None, java_extra_args=None, 
         use_home_for_ice=False, node_id=None, username=None,
-        random_udp_drop=False
+        random_udp_drop=False,
+        redirect_import_folder_to_s3_path=None,
+        enable_h2o_log=True, 
+        enable_benchmark_log=False,
         ):
+ 
+        self.redirect_import_folder_to_s3_path = redirect_import_folder_to_s3_path
 
         if use_debugger is None: use_debugger = debugger
         self.aws_credentials = aws_credentials
@@ -1257,12 +1394,11 @@ class H2O(object):
         self.use_hdfs = use_hdfs
         self.hdfs_name_node = hdfs_name_node
         self.hdfs_version = hdfs_version
-        self.hdfs_root = hdfs_root
         self.hdfs_config = hdfs_config
-        self.hdfs_nopreload = hdfs_nopreload
 
         self.use_flatfile = use_flatfile
         self.java_heap_GB = java_heap_GB
+        self.java_heap_MB = java_heap_MB
         self.java_extra_args = java_extra_args
 
         self.use_home_for_ice = use_home_for_ice
@@ -1272,7 +1408,14 @@ class H2O(object):
         # don't want multiple reports from tearDown and tearDownClass
         # have nodes[0] remember (0 always exists)
         self.sandbox_error_was_reported = False
+        self.sandbox_ignore_errors = False
+
         self.random_udp_drop = random_udp_drop
+        self.enable_h2o_log = enable_h2o_log
+
+        # this dumps stats from tests, and perf stats while polling to benchmark.log
+        self.enable_benchmark_log = enable_benchmark_log
+
 
     def __str__(self):
         return '%s - http://%s:%d/' % (type(self), self.http_addr, self.port)
@@ -1391,18 +1534,18 @@ class RemoteHost(object):
             # Just don't log anything until build_cloud()? that should be okay?
             # we were just logging this upload message..not needed.
             # log('Uploading to %s: %s -> %s' % (self.http_addr, f, dest))
-
             sftp = self.ssh.open_sftp()
             # check if file exists on remote side
             try:
                 sftp.stat(dest)
-                verboseprint("Skipping upload of file {0} because file {1} exists on remote side!".format(f, dest))
+                print "Skipping upload of file {0}. File {1} exists on remote side!".format(f, dest)
             except IOError, e:
                 if e.errno == errno.ENOENT:
                     sftp.put(f, dest, callback=progress)
             finally:
                 sftp.close()
             self.uploaded[f] = dest
+        sys.stdout.flush()
         return self.uploaded[f]
 
     def record_file(self, f, dest):
@@ -1456,8 +1599,6 @@ class RemoteHost(object):
         return RemoteH2O(self, self.addr, *args, **kwargs)
 
     def open_channel(self):
-        # kbn
-        # ch = self.ssh.invoke_shell()
         ch = self.ssh.get_transport().open_session()
         ch.get_pty() # force the process to die without the connection
         return ch
@@ -1478,6 +1619,9 @@ class RemoteH2O(H2O):
         if self.aws_credentials:
             self.aws_credentials = host.upload_file(self.aws_credentials)
 
+        if self.hdfs_config:
+            self.hdfs_config = host.upload_file(self.hdfs_config)
+
         if self.use_home_for_ice:
             # this will be the username used to ssh to the host
             self.ice = "/home/" + host.username + '/ice.%d.%s' % (self.port, time.time())
@@ -1489,7 +1633,18 @@ class RemoteH2O(H2O):
        
         # this fires up h2o over there
         cmd = ' '.join(self.get_args())
-        self.channel.exec_command(cmd)
+        # UPDATE: somehow java -jar on cygwin target (xp) can't handle /tmp/h2o*jar
+        # because it's a windows executable and expects windows style path names.
+        # but if we cd into /tmp, it can do java -jar h2o*jar.
+        # So just split out the /tmp (pretend we don't know) and the h2o jar file name
+        # Newer windows may not have this problem? Do the ls (this goes into the local stdout
+        # files) so we can see the file is really where we expect.
+        # This hack only works when the dest is /tmp/h2o*jar. It's okay to execute
+        # with pwd = /tmp. If /tmp/ isn't in the jar path, I guess things will be the same as
+        # normal.
+        self.channel.exec_command("cd /tmp; ls -ltr "+self.jar+"; "+ \
+            re.sub("/tmp/","",cmd)) # removing the /tmp/ we know is in there
+
         if self.capture_output:
             if self.node_id is not None:
                 logPrefix = 'remote-h2o-' + str(self.node_id)

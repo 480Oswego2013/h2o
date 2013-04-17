@@ -11,10 +11,10 @@ import com.google.gson.JsonObject;
  * Simple web page to guide model validation.
  */
 public class Score extends Request {
-  protected final H2OModelKey<Model> _modelKey;
+  protected final H2OModelKey<Model,TypeaheadModelKeyRequest> _modelKey;
 
   public Score() {
-    _modelKey = new H2OModelKey<Model>(new TypeaheadModelKeyRequest(),MODEL_KEY,true);
+    _modelKey = new H2OModelKey(new TypeaheadModelKeyRequest(),MODEL_KEY,true);
     // Force refresh because the true set of argument queries depends on the
     // columns in the model... when it finally appears.
     _modelKey.setRefreshOnChange();
@@ -57,8 +57,9 @@ public class Score extends Request {
     Model M = _modelKey.value();
     // Extract the datarow from the argument vector.
     // The args are in the same order as the columns, except for the leading model_key.
-    double d[] = new double[M._va._cols.length-1];
-    for( int i=0; i<d.length; i++ ) {
+    // Skips the last column (response column).
+    double d[] = new double[M._va._cols.length];
+    for( int i=0; i<d.length-1; i++ ) {
       Argument arg = _arguments.get(i+1);
       if( false ) ;
       else if( arg instanceof FactorSelect ) d[i] = (Integer)arg.value();
@@ -75,7 +76,7 @@ public class Score extends Request {
     JsonArray rows = new JsonArray();
     JsonObject obj = new JsonObject();
     obj.addProperty(ROW,0);     // Bogus row number
-    for( int i=0; i<d.length; i++ ) {
+    for( int i=0; i<d.length-1; i++ ) {
       ValueArray.Column C = M._va._cols[i];
       obj.addProperty(C._name,
                       C._domain==null

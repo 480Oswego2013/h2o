@@ -1,8 +1,7 @@
 package water.api;
 
-import water.*;
-import water.Jobs.Job;
-import water.Jobs;
+import water.Job;
+import water.Key;
 
 import com.google.gson.JsonObject;
 
@@ -22,8 +21,8 @@ public class Progress extends Request {
     Job job = findJob();
     JsonObject jsonResponse = defaultJsonResponse();
 
-    if( job == null )
-      return jobDone(jsonResponse);
+    if( job == null || job._endTime != 0 )
+      return jobDone(job, jsonResponse);
 
     return jobInProgress(job, jsonResponse);
   }
@@ -31,14 +30,7 @@ public class Progress extends Request {
   /** Find job key for this request */
   protected Job findJob() {
     Key key = Key.make(_job.value());
-    Job job = null;
-    for( Job current : Jobs.get() ) {
-      if( current._key.equals(key) ) {
-        job = current;
-        break;
-      }
-    }
-    return job;
+    return Job.findJob(key);
   }
 
   /** Create default Json response with destination key */
@@ -49,14 +41,13 @@ public class Progress extends Request {
   }
 
   /** Return {@link Response} for finished job. */
-  protected Response jobDone(final JsonObject jsonResp) {
-    return Inspect.redirect(jsonResp, Key.make(_dest.value()));
+  protected Response jobDone(final Job job,final JsonObject jsonResp) {
+    return Inspect.redirect(jsonResp, job, Key.make(_dest.value()));
   }
 
   /** Return default progress {@link Response}. */
   protected Response jobInProgress(final Job job, JsonObject jsonResp) {
-    Jobs.Progress progress = UKV.get(job._progress, new Jobs.Progress());
-    Response r = Response.poll(jsonResp, progress != null ? progress.get() : 1f);
+    Response r = Response.poll(jsonResp, job.progress());
 
     final String description = job._description;
     r.setBuilder(ROOT_OBJECT, defaultProgressBuilder(description));
@@ -65,7 +56,7 @@ public class Progress extends Request {
   }
 
   static final ObjectBuilder defaultProgressBuilder(final String description) {
-    return  new ObjectBuilder() {
+    return new ObjectBuilder() {
       @Override
       public String caption(JsonObject object, String objectName) {
         return "<h3>" + description + "</h3>";

@@ -37,7 +37,7 @@ class Basic(unittest.TestCase):
         global localhost
         localhost = h2o.decide_if_localhost()
         if (localhost):
-            h2o.build_cloud(1,java_heap_GB=28)
+            h2o.build_cloud(1,java_heap_GB=10)
         else:
             h2o_hosts.build_cloud_with_hosts()
 
@@ -100,8 +100,8 @@ class Basic(unittest.TestCase):
                 'link': 'logit',
                 'y': y, 
                 'max_iter': 8, 
-                'num_cross_validation_folds': 0, 
-                'beta_eps': 1e-4,
+                'n_folds': 0, 
+                'beta_epsilon': 1e-4,
                 'alpha': 0, 
                 'lambda': 0 
                 }

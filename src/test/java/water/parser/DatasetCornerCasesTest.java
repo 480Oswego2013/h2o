@@ -9,7 +9,6 @@ import org.junit.Test;
 import water.*;
 import water.DRemoteTask.DFuture;
 import water.parser.ParseDataset;
-import water.util.TestUtil;
 
 public class DatasetCornerCasesTest extends TestUtil {
 
@@ -21,9 +20,9 @@ public class DatasetCornerCasesTest extends TestUtil {
   @Test public void testTwoLineDataset() throws Exception {
     Key fkey = load_test_file("smalldata/test/HTWO-87-two-lines-dataset.csv");
     Key okey = Key.make("HTWO-87-two-lines-dataset.hex");
-    ParseDataset.parse(okey,DKV.get(fkey));
+    ParseDataset.parse(okey,new Key[]{fkey});
     UKV.remove(fkey);
-    ValueArray val = ValueArray.value(DKV.get(okey));
+    ValueArray val = DKV.get(okey).get();
 
     // Check parsed dataset
     assertEquals("Number of chunks == 1", 1, val.chunks());
@@ -44,11 +43,11 @@ public class DatasetCornerCasesTest extends TestUtil {
     try {
       final Key modelKey = Key.make("model");
       DRFFuture result = hex.rf.DRF.execute(modelKey, cols, val,
-                                   ntrees,depth,1.0f,(short)1024,statType,seed,true,null,-1,false,null,0,0);
+                                   ntrees,depth,1024,statType,seed,true,null,-1,Sampling.Strategy.RANDOM,1.0f,null,0,0);
       // Just wait little bit
       result.get();
       // Create incremental confusion matrix
-      RFModel model = UKV.get(modelKey, new RFModel());
+      RFModel model = UKV.get(modelKey);
       assertEquals("Number of classes == 1", 1,  model.classes());
       assertTrue("Number of trees > 0 ", model.size()> 0);
       model.deleteKeys();
@@ -87,9 +86,9 @@ public class DatasetCornerCasesTest extends TestUtil {
   private void testOneLineDataset(String filename, String keyname) {
     Key fkey = load_test_file(filename);
     Key okey = Key.make(keyname);
-    ParseDataset.parse(okey,DKV.get(fkey));
+    ParseDataset.parse(okey,new Key[]{fkey});
 
-    ValueArray val = ValueArray.value(DKV.get(okey));
+    ValueArray val = DKV.get(okey).get();
     assertEquals(filename + ": number of chunks == 1", 1, val.chunks());
     assertEquals(filename + ": number of rows   == 2", 2, val._numrows);
     assertEquals(filename + ": number of cols   == 9", 9, val._cols.length);

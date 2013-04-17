@@ -20,8 +20,8 @@ def write_syn_dataset(csvPathname, rowCount, colCount, SEED):
         rowTotal = 0
         # do jumpahead per row, so the combination of rows plus col dice rolls
         # doesn't allow prediction of the RNG so well? (an issue with 500 col datasets)
-        r1.jumpahead(922377089)   
-        r2.jumpahead(488915466)
+        ### r1.jumpahead(922377089)   
+        ### r2.jumpahead(488915466)
         for j in range(colCount):
             # ri1 = int(r1.gauss(1,.1))
             ri1 = r1.randint(0,1)
@@ -95,7 +95,7 @@ class Basic(unittest.TestCase):
                     'max_iter': 10, 
                     'weight': 1.0,
                     'link': 'familyDefault',
-                    'num_cross_validation_folds': 2,
+                    'n_folds': 2,
                     'beta_epsilon': 1e-4,
                     #***********
                     'lambda': '1e-8:1e-3:1e2',
@@ -111,7 +111,7 @@ class Basic(unittest.TestCase):
             emsg = None
             for i in range(25):
                 start = time.time()
-                glm = h2o_cmd.runGLMGridOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, **kwargs)
+                glm = h2o_cmd.runGLMGridOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, noise=("Jstack", None), **kwargs)
                 print 'glm #', i, 'end on', csvPathname, 'took', time.time() - start, 'seconds'
                 # we can pass the warning, without stopping in the test, so we can 
                 # redo it in the browser for comparison

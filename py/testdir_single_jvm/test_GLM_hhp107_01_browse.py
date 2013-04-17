@@ -10,8 +10,7 @@ sys.path.extend(['.','..','py'])
 # ignoring constant column 91
 # ignoring constant column 103
 
-import h2o, h2o_cmd
-import h2o_hosts, h2o_glm
+import h2o, h2o_cmd, h2o_hosts, h2o_glm
 import h2o_browse as h2b
 import time
 
@@ -29,7 +28,7 @@ argcaseList = [
         'weight': 1.0,
         'thresholds': 0.5,
         'link': 'familyDefault',
-        'num_cross_validation_folds': 0,
+        'n_folds': 0,
         'alpha': 1,
         'beta_epsilon': 1.0E-4 },
     ]

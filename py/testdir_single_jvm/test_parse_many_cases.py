@@ -3,6 +3,7 @@ import re, os, shutil, sys
 sys.path.extend(['.','..','py'])
 
 import h2o, h2o_cmd, h2o_hosts
+import random
 
 class Basic(unittest.TestCase):
     def tearDown(self):
@@ -12,24 +13,29 @@ class Basic(unittest.TestCase):
     def setUpClass(cls):
         global SYNDATASETS_DIR
         SYNDATASETS_DIR = h2o.make_syn_dir()
-        h2o.build_cloud(node_count=1) 
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=1) 
+        else:
+            h2o_hosts.build_cloud_with_hosts(node_count=1) 
 
     @classmethod 
     def tearDownClass(cls): 
         h2o.tear_down_cloud()
 
-    def test_many_parse1(self):
+    def test_A_many_parse1(self):
         rows = self.genrows1()
         set = 1
         self.tryThemAll(set,rows)
 
-    def test_many_parse2(self):
+    def test_B_many_parse2(self):
         rows = self.genrows2()
         set = 2
         self.tryThemAll(set,rows)
 
     # this one has problems with blank lines
-    def test_many_parse3(self):
+    def test_C_many_parse3(self):
         rows = self.genrows3()
         set = 3
         self.tryThemAll(set,rows)
@@ -39,11 +45,12 @@ class Basic(unittest.TestCase):
         # FIX! what about blank fields and spaces as sep
         # FIX! temporary need more lines to avoid sample error in H2O
         # throw in some variants for leading 0 on the decimal, and scientific notation
+        # new: change the @ to an alternate legal SEP if the special HIVE SEP is in play
         rows = [
         "# 'comment, is okay",
         '# "this comment, is okay too',
         "# 'this' comment, is okay too",
-        "FirstName|MiddleInitials|LastName|DateofBirth",
+        "@FirstName@|@Middle@Initials@|@LastName@|@Date@of@Birth@ ",
         "0|0.5|1|0",
         "3|NaN|4|1",
         "6||8|0",
@@ -86,11 +93,11 @@ class Basic(unittest.TestCase):
     # FIX! needed an extra line to avoid bug on default 67+ sample?
     def genrows2(self):
         rows = [
-        "FirstName|MiddleInitials|LastName|DateofBirth",
+        "First@Name|@MiddleInitials|LastName@|Date@ofBirth",
         "Kalyn|A.|Dalton|1967-04-01",
         "Gwendolyn|B.|Burton|1947-10-26",
         "Elodia|G.|Ali|1983-10-31",
-        "Elodia|G.|Ali|1983-10-31",
+        "Elo@dia|@G.|Ali@|1983-10-31",
         "Elodia|G.|Ali|1983-10-31",
         "Elodia|G.|Ali|1983-10-31",
         "Elodia|G.|Ali|1983-10-31",
@@ -168,9 +175,11 @@ class Basic(unittest.TestCase):
         # what about case of missing eoll at end of file?
     
     sepChangeDict = {
-        0:",",
-        1:" ",
-        2:"\t"
+        # NEW: 0x01 can be SEP character for Hive datasets
+        0:"",
+        1:",",
+        2:" ",
+        3:"\t",
         }
     
     def changeSep(self,rows,sepCase):
@@ -188,6 +197,18 @@ class Basic(unittest.TestCase):
             newSep = self.sepChangeDict[sepCase]
 
         newRows = [r.replace('|',newSep) for r in rows]
+
+        # special case, if using the HIVE sep, substitute randomly
+        # one of the other SEPs into the "@" in the template
+        # FIX! we need to add HIVE lineends into lineend choices.
+        # assuming that lineend
+        if newSep == "":
+            # don't use the same SEP to swap in.
+            randomOtherSep = random.choice(self.sepChangeDict.values())
+            while (randomOtherSep==newSep):
+                randomOtherSep = random.choice(self.sepChangeDict.values())
+            newRows = [r.replace('@',randomOtherSep) for r in newRows]
+
         return newRows
     
     def tryThemAll(self,set,rows):
@@ -206,7 +227,7 @@ class Basic(unittest.TestCase):
                         '.data'
                     self.writeRows(csvPathname,newRows2,eol)
                     h2o_cmd.runRF(trees=1, csvPathname=csvPathname,
-                        timeoutSecs=10, retryDelaySecs=0.1)
+                        timeoutSecs=10, retryDelaySecs=0.1, noPrint=True, print_params=False)
                     h2o.verboseprint("Set", set)
                     h2o.check_sandbox_for_errors()
                     sys.stdout.write('.')

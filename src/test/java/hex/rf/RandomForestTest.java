@@ -7,7 +7,6 @@ import hex.rf.Tree.StatType;
 import org.junit.BeforeClass;
 
 import water.*;
-import water.util.TestUtil;
 
 public class RandomForestTest extends TestUtil {
 
@@ -18,10 +17,11 @@ public class RandomForestTest extends TestUtil {
     Key okey = loadAndParseKey("credit.hex", "smalldata/kaggle/creditsample-training.csv.gz");
     UKV.remove(Key.make("smalldata/kaggle/creditsample-training.csv.gz_UNZIPPED"));
     UKV.remove(Key.make("smalldata\\kaggle\\creditsample-training.csv.gz_UNZIPPED"));
-    ValueArray val = ValueArray.value(okey);
+    ValueArray val = DKV.get(okey).get();
 
     // Check parsed dataset
-    assertEquals("Number of chunks", 4, val.chunks());
+    final int n = new int[]{4,2,1}[ValueArray.LOG_CHK-20];
+    assertEquals("Number of chunks", n, val.chunks());
     assertEquals("Number of rows", 150000, val.numRows());
     assertEquals("Number of cols", 12, val.numCols());
 
@@ -35,12 +35,12 @@ public class RandomForestTest extends TestUtil {
 
     // Start the distributed Random Forest
     final Key modelKey = Key.make("model");
-    DRFFuture result = hex.rf.DRF.execute(modelKey,cols,val,ntrees,depth,1.0f,(short)1024,statType,seed, true, null, -1, false, null, 0, 0);
+    DRFFuture result = hex.rf.DRF.execute(modelKey,cols,val,ntrees,depth,1024,statType,seed, true, null, -1, Sampling.Strategy.RANDOM, 1.0f, null, 0, 0);
     // Just wait little bit
     result.get();
 
     // Create incremental confusion matrix.
-    RFModel model = UKV.get(modelKey, new RFModel());
+    RFModel model = UKV.get(modelKey);
 
     assertEquals("Number of classes", 2,  model.classes());
     assertEquals("Number of trees", ntrees, model.size());

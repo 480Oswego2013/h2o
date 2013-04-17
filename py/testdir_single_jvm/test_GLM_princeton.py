@@ -1,7 +1,7 @@
 import unittest, time, sys
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd, h2o_glm, h2o_util
+import h2o, h2o_cmd, h2o_glm, h2o_util, h2o_hosts
 
 class Basic(unittest.TestCase):
     def tearDown(self):
@@ -9,7 +9,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(1)
+        else:
+            h2o_hosts.build_cloud_with_hosts(1)
         global SYNDATASETS_DIR
         SYNDATASETS_DIR = h2o.make_syn_dir()
 
@@ -33,7 +38,7 @@ class Basic(unittest.TestCase):
             csvPathname2 = SYNDATASETS_DIR + '/' + csvFilename + '_stripped.csv'
             h2o_util.file_strip_trailing_spaces(csvPathname1, csvPathname2)
 
-            kwargs = {'num_cross_validation_folds': 0, 'family': family, 'link': 'familyDefault', 'y': y}
+            kwargs = {'n_folds': 0, 'family': family, 'link': 'familyDefault', 'y': y}
             start = time.time()
             glm = h2o_cmd.runGLM(csvPathname=csvPathname2, key=csvFilename, timeoutSecs=timeoutSecs, **kwargs)
             h2o_glm.simpleCheckGLM(self, glm, None, **kwargs)

@@ -1,7 +1,7 @@
 import unittest, time, sys
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd, h2o_glm
+import h2o, h2o_cmd, h2o_glm, h2o_hosts
 
 class Basic(unittest.TestCase):
     def tearDown(self):
@@ -9,7 +9,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(1)
+        else:
+            h2o_hosts.build_cloud_with_hosts(1)
 
     @classmethod
     def tearDownClass(cls):
@@ -26,7 +31,7 @@ class Basic(unittest.TestCase):
         for (csvFilename, y, timeoutSecs) in csvFilenameList:
             csvPathname = h2o.find_file("smalldata/logreg/umass_statdata/" + csvFilename)
             print "\n" + csvPathname
-            kwargs = {'num_cross_validation_folds': 0, 'family': 'binomial', 'link': 'familyDefault', 'y': y}
+            kwargs = {'n_folds': 0, 'family': 'binomial', 'link': 'familyDefault', 'y': y}
             start = time.time()
             glm = h2o_cmd.runGLM(csvPathname=csvPathname, key=csvFilename, timeoutSecs=timeoutSecs, **kwargs)
             h2o_glm.simpleCheckGLM(self, glm, None, **kwargs)

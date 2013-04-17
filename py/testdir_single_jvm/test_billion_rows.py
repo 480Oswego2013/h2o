@@ -1,10 +1,8 @@
 import os, json, unittest, time, shutil, sys
 sys.path.extend(['.','..','py'])
-import h2o, h2o_cmd
-import h2o_hosts
+import h2o, h2o_cmd, h2o_hosts, h2o_glm
 import h2o_browse as h2b
 import h2o_import as h2i
-import h2o_glm
 import time, random
 
 class Basic(unittest.TestCase):
@@ -13,7 +11,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(1,java_heap_GB=14)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(1,java_heap_GB=10)
+        else:
+            h2o_hosts.build_cloud_with_hosts(1,java_heap_GB=10)
 
     @classmethod
     def tearDownClass(cls):
@@ -24,7 +27,7 @@ class Basic(unittest.TestCase):
         # importFolderPath = "/home/hduser/hdfs_datasets"
         importFolderPath = "/home/0xdiag/datasets"
         h2i.setupImportFolder(None, importFolderPath)
-        timeoutSecs = 500
+        timeoutSecs = 900
 
         #    "covtype169x.data",
         #    "covtype.13x.shuffle.data",
@@ -44,10 +47,14 @@ class Basic(unittest.TestCase):
 
         for csvFilename in csvFilenameList:
             # creates csvFilename.hex from file in importFolder dir 
+            start = time.time()
             parseKey = h2i.parseImportFolderFile(None, csvFilename, importFolderPath, 
                 timeoutSecs=500, pollTimeoutSecs=60)
+            elapsed = time.time() - start
             print csvFilename, 'parse time:', parseKey['response']['time']
             print "Parse result['destination_key']:", parseKey['destination_key']
+            print csvFilename, "completed in", elapsed, "seconds.", "%d pct. of timeout" % ((elapsed*100)/timeoutSecs)
+
 
             # We should be able to see the parse result?
             inspect = h2o_cmd.runInspect(key=parseKey['destination_key'])
@@ -62,7 +69,7 @@ class Basic(unittest.TestCase):
             ### h2b.browseJsonHistoryAsUrlLastMatch("RFView")
 
             # now some GLm
-            kwargs = {'x': 0, 'y': 1, 'num_cross_validation_folds': 0, 'case_mode': '=', 'case': 1}
+            kwargs = {'x': 0, 'y': 1, 'n_folds': 0, 'case_mode': '=', 'case': 1}
             # one coefficient is checked a little more
             colX = 0
 
@@ -73,23 +80,6 @@ class Basic(unittest.TestCase):
             elapsed = time.time() - start
             print "glm (L2) end on ", csvFilename, 'took', elapsed, 'seconds.', "%d pct. of timeout" % ((elapsed/timeoutSecs) * 100)
             h2o_glm.simpleCheckGLM(self, glm, colX, **kwargs)
-
-            # Elastic
-            kwargs.update({'alpha': 0.5, 'lambda': 1e-4})
-            start = time.time()
-            glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, **kwargs)
-            elapsed = time.time() - start
-            print "glm (Elastic) end on ", csvFilename, 'took', elapsed, 'seconds.', "%d pct. of timeout" % ((elapsed/timeoutSecs) * 100)
-            h2o_glm.simpleCheckGLM(self, glm, colX, **kwargs)
-
-            # L1
-            kwargs.update({'alpha': 1.0, 'lambda': 1e-4})
-            start = time.time()
-            glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, **kwargs)
-            elapsed = time.time() - start
-            print "glm (L1) end on ", csvFilename, 'took', elapsed, 'seconds.', "%d pct. of timeout" % ((elapsed/timeoutSecs) * 100)
-            h2o_glm.simpleCheckGLM(self, glm, colX, **kwargs)
-
 
             sys.stdout.write('\n.')
             sys.stdout.flush() 

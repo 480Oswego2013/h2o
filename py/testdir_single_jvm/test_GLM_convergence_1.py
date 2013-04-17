@@ -10,10 +10,10 @@ def write_syn_dataset(csvPathname, rowCount, colCount, SEED):
 
     # getting correlated results?
     r1 = random.Random(SEED)
-    r1.jumpahead(922377089)   
+    ### r1.jumpahead(922377089)   
 
     r2 = random.Random(SEED)
-    r2.jumpahead(488915466)
+    ### r2.jumpahead(488915466)
     dsf = open(csvPathname, "w+")
 
     for i in range(rowCount):
@@ -95,7 +95,7 @@ class Basic(unittest.TestCase):
                     'link': 'familyDefault',
                     # what about these?
                     # 'link': [None, 'logit','identity', 'log', 'inverse'],
-                    'num_cross_validation_folds': 0,
+                    'n_folds': 0,
                     'beta_epsilon': 1e-4,
                     'thresholds': '0:1:0.01',
                     }

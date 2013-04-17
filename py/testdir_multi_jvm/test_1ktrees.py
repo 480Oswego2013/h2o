@@ -1,7 +1,7 @@
 import os, json, unittest, time, shutil, sys
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd as cmd 
+import h2o, h2o_cmd as cmd, h2o_hosts
 import argparse
 
 class Basic(unittest.TestCase):
@@ -10,7 +10,11 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(2)
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(2)
+        else:
+            h2o_hosts.build_cloud_with_hosts()
 
     @classmethod
     def tearDownClass(cls):
@@ -42,6 +46,10 @@ class Basic(unittest.TestCase):
             start = time.time()
             cmd.runRFOnly(parseKey=parseKey, trees=1000, depth=2, timeoutSecs=600, retryDelaySecs=3)
             print "RF #", trial,  "end on ", csvFilename, 'took', time.time() - start, 'seconds'
+
+        print "Waiting 60 secs for TIME_WAIT sockets to go away"
+        time.sleep(60)
+
 
 if __name__ == '__main__':
     h2o.unit_main()

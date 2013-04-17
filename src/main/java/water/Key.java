@@ -38,9 +38,9 @@ public final class Key extends Iced implements Comparable {
 
   public static final byte KEY_OF_KEYS = 1;
 
-  public static final byte TASK = 2;
+  public static final byte BUILT_IN_KEY = 2; // C.f. Constants.BUILT_IN_KEY_*
 
-  public static final byte SINGLETONS = 3;
+  public static final byte JOB = 3;
 
   public static final byte HDFS_INTERNAL_BLOCK = 10;
 
@@ -223,7 +223,7 @@ public final class Key extends Iced implements Comparable {
     assert (_kb[0]&0xFF)==KEY_OF_KEYS;
     Value val = DKV.get(this);
     if( val == null ) return null;
-    return val.flatten();
+    return ((Key.Ary)val.get())._keys;
   }
 
 
@@ -308,5 +308,17 @@ public final class Key extends Iced implements Comparable {
   public int compareTo(Object o) {
     assert (o instanceof Key);
     return this.toString().compareTo(o.toString());
+  }
+
+  // Simple wrapper class defining an array-of-keys that is serializable.
+  // Note that if you modify any fields of a POJO that is part of a Value,
+  // - this is not the recommended programming style,
+  // - those changes are visible to all on the node,
+  // - but not to other nodes
+  // - and the POJO might be dropped by the MemoryManager and reconstitued from
+  //   disk and/or the byte array back to it's original form.
+  public static class Ary extends Iced {
+    public final Key[] _keys;
+    Ary( Key[] keys ) { _keys = keys; }
   }
 }

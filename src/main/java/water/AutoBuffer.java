@@ -8,6 +8,8 @@ import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import water.api.Timeline;
+
 /**
  * A ByteBuffer backed mixed Input/OutputStream class.
  *
@@ -18,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @author <a href="mailto:cliffc@0xdata.com"></a>
  */
 public final class AutoBuffer {
+  public static final int TCP_WRITE_ATTEMPTS = 2;
   // The direct ByteBuffer for schlorping data about
   public ByteBuffer _bb;
 
@@ -33,7 +36,7 @@ public final class AutoBuffer {
   // we are blocking another Node with I/O.
   private int _oldPrior = -1;
   // Count of concurrent TCP requests both incoming and outgoing
-  private static final AtomicInteger TCPS = new AtomicInteger(0);
+  public static final AtomicInteger TCPS = new AtomicInteger(0);
 
   // Where to send or receive data via TCP or UDP (choice made as we discover
   // how big the message is); used to lazily create a Channel.  If NULL, then
@@ -47,6 +50,10 @@ public final class AutoBuffer {
   // The UDP-flavor, port# and task fields are only valid until we read over
   // them when flipping the ByteBuffer to the next chunk of data.
   private boolean _firstPage;
+
+  // Total size written out from 'new' to 'close'.  Only updated when actually
+  // writing data, or after close().
+  private int _size;
 
   // The assumed max UDP packetsize
   public static final int MTU = 1500-8/*UDP packet header size*/;
@@ -79,6 +86,7 @@ public final class AutoBuffer {
   // Incoming TCP request.  Make a read-mode AutoBuffer from the open Channel,
   // figure the originating H2ONode from the first few bytes read.
   public AutoBuffer( SocketChannel sock ) throws IOException {
+    TCPS.incrementAndGet();
     _chan = sock;
     raisePriority();            // Make TCP priority high
     _bb = bbMake();
@@ -159,7 +167,7 @@ public final class AutoBuffer {
     StringBuilder sb = new StringBuilder();
     sb.append("[AB ").append(_read ? "read " : "write ");
     sb.append(_firstPage?"first ":"2nd ").append(_h2o);
-    sb.append("0 <= ").append(_bb.position()).append(" <= ").append(_bb.limit());
+    sb.append(" 0 <= ").append(_bb.position()).append(" <= ").append(_bb.limit());
     sb.append(" <= ").append(_bb.capacity());
     return sb.append("]").toString();
   }
@@ -208,8 +216,7 @@ public final class AutoBuffer {
   // bytes out.  If the write is to an H2ONode and is short, send via UDP.
   // AutoBuffer close calls order; i.e. a reader close() will block until the
   // writer does a close().
-  public final int close() { return close(false); }
-  public final int close(boolean forceTcp ) {
+  public final int close() { 
     assert _h2o != null || _chan != null;      // Byte-array backed should not be closed
     try {
       if( _chan == null ) {     // No channel?
@@ -217,14 +224,14 @@ public final class AutoBuffer {
         // For small-packet write, send via UDP.  Since nothing is sent until
         // now, this close() call trivially orders - since the reader will not
         // even start (much less close()) until this packet is sent.
-        if( !forceTcp && _bb.position() < MTU ) return udpSend();
+        if( _bb.position() < MTU ) return udpSend();
       }
       // Force AutoBuffer 'close' calls to order; i.e. block readers until
       // writers do a 'close' - by writing 1 more byte in the close-call which
       // the reader will have to wait for.
       if( _read ) {             // Reader?
         int x = get1();         // Read 1 more byte
-        assert x == 0xab;
+        assert x == 0xab : "AB.close instead of 0xab sentinel got "+x+", "+this;
       } else {                  // Writer?
         put1(0xab);             // Write one-more byte
         sendPartial();          // Finish partial TCP writes
@@ -245,14 +252,13 @@ public final class AutoBuffer {
       while( _chan.read(_bb) != -1 )
         _bb.clear();
       _chan.close();
-      TCPS.decrementAndGet();
       restorePriority();        // And if we raised priority, lower it back
+      TCPS.decrementAndGet();
       bbFree();
     } catch( IOException e ) {  // Dunno how to handle so crash-n-burn
       throw new RuntimeException(e);
     }
   }
-
 
   // Need a sock for a big read or write operation
   private void tcpOpen() throws IOException {
@@ -271,13 +277,14 @@ public final class AutoBuffer {
 
   // True if we are in read-mode
   boolean readMode() { return _read; }
+  // Size in bytes sent, after a close()
+  int size() { return _size; }
 
   // Available bytes in this buffer to read
   public int remaining() { return _bb.remaining(); }
   public int position () { return _bb.position (); }
   public void position(int pos) { _bb.position(pos); }
   public int limit() { return _bb.limit(); }
-  public boolean firstPage() { return _firstPage; }
 
   public void positionWithResize(int value) {
     putSp(value - position());
@@ -304,9 +311,11 @@ public final class AutoBuffer {
   // blocking other Nodes with our network I/O, so try to get the I/O
   // over with.
   private void raisePriority() {
-    assert _chan instanceof SocketChannel && _oldPrior == -1;
-    _oldPrior = Thread.currentThread().getPriority();
-    Thread.currentThread().setPriority(Thread.MAX_PRIORITY-1);
+    if(_oldPrior == -1){
+      assert _chan instanceof SocketChannel && _oldPrior == -1;
+      _oldPrior = Thread.currentThread().getPriority();
+      Thread.currentThread().setPriority(Thread.MAX_PRIORITY-1);
+    }
   }
 
   private void restorePriority() {
@@ -320,7 +329,8 @@ public final class AutoBuffer {
   // not connect it up-front to a target - but send the entire packet right now.
   private int udpSend() throws IOException {
     assert _chan == null;
-    TimeLine.record_send(this);
+    TimeLine.record_send(this,false);
+    _size += _bb.position();
     _bb.flip();                 // Flip for sending
     if( _h2o==H2O.SELF ) {      // SELF-send is the multi-cast signal
       H2O.multicast(_bb);
@@ -387,7 +397,6 @@ public final class AutoBuffer {
     if( sz <= _bb.remaining() ) return _bb;
     return sendPartial();
   }
-
   // Do something with partial results, because the ByteBuffer is full.
   // If we are byte[] backed, double the backing array size.
   // If we are doing I/O, ship the bytes we have now and flip the ByteBuffer.
@@ -403,20 +412,24 @@ public final class AutoBuffer {
       return _bb;
     }
     // Doing I/O with the full ByteBuffer - ship partial results
-    try {
-      _bb.flip(); // Prep for writing.
-      if( _chan == null )
+    _size += _bb.position();
+    if( _chan == null )
+      TimeLine.record_send(this,true);
+    _bb.flip(); // Prep for writing.
+    _bb.mark();
+    try{
+      if( _chan == null)
         tcpOpen(); // This is a big operation.  Open a TCP socket as-needed.
-      while( _bb.hasRemaining() ) _chan.write(_bb);
-      if( _bb.capacity() < 16*1024 ) _bb = bbMake();
-      _firstPage = false;
-      _bb.clear();
-      return _bb;
-    } catch( IOException e ) {   // Dunno how to handle so crash-n-burn
-      if( e.getMessage().equals("Connection reset by peer") )
-        UDPRebooted.suicide( UDPRebooted.T.error, _h2o );
-      throw new RuntimeException(e);
+      while( _bb.hasRemaining() )
+        _chan.write(_bb);
+    } catch( IOException e ) {   // Can't open the connection, try again later
+      System.err.println("TCP Open/Write failed: " + e.getMessage()+" talking to "+_h2o);
+      throw new Error(e);
     }
+    if( _bb.capacity() < 16*1024 ) _bb = bbMake();
+    _firstPage = false;
+    _bb.clear();
+    return _bb;
   }
 
   public int peek1() {
@@ -478,38 +491,45 @@ public final class AutoBuffer {
   public AutoBuffer put8d(double d) { putSp(8).putDouble(d); return this; }
 
   public AutoBuffer put(Freezable f) {
-    if( f == null ) return put2((short)-1);
-    put2((short)TypeMap.MAP.getId(f));
+    if( f == null ) return put2(TypeMap.NULL);
+    put2((short) f.frozenType());
     return f.write(this);
   }
-  public AutoBuffer putA(Freezable[] fs)    {
+  public AutoBuffer put(Iced f) {
+    if( f == null ) return put2(TypeMap.NULL);
+    put2((short) f.frozenType());
+    return f.write(this);
+  }
+  public AutoBuffer putA(Iced[] fs) {
     if( fs == null ) return put4(-1);
     put4(fs.length);
-    for( Freezable f : fs ) put(f);
+    for( Iced f : fs ) put(f);
     return this;
   }
-  public AutoBuffer putAA(Freezable[][] fs)    {
+  public AutoBuffer putAA(Iced[][] fs) {
     if( fs == null ) return put4(-1);
     put4(fs.length);
-    for( Freezable[] f : fs ) putA(f);
+    for( Iced[] f : fs ) putA(f);
     return this;
   }
 
   public <T extends Freezable> T get(Class<T> t) {
     short id = (short)get2();
-    if( id == -1 ) return null;
-    Freezable f = TypeMap.MAP.getType(id);
-    assert t.isInstance(f);
-    return f.read(this);
+    if( id == TypeMap.NULL ) return null;
+    return TypeMap.newFreezable(id).read(this);
   }
-
-  public <T extends Freezable> T[] getA(Class<T> tc) {
+  public <T extends Iced> T get() {
+    short id = (short)get2();
+    if( id == TypeMap.NULL ) return null;
+    return TypeMap.newInstance(id).read(this);
+  }
+  public <T extends Iced> T[] getA(Class<T> tc) {
     int len = get4(); if( len == -1 ) return null;
     T[] ts = (T[]) Array.newInstance(tc, len);
-    for( int i = 0; i < len; ++i ) ts[i] = get(tc);
+    for( int i = 0; i < len; ++i ) ts[i] = get();
     return ts;
   }
-  public <T extends Freezable> T[][] getAA(Class<T> tc) {
+  public <T extends Iced> T[][] getAA(Class<T> tc) {
     int len = get4(); if( len == -1 ) return null;
     Class<T[]> tcA = (Class<T[]>) Array.newInstance(tc, 0).getClass();
     T[][] ts = (T[][]) Array.newInstance(tcA, len);

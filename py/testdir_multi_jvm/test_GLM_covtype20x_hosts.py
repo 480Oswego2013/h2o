@@ -14,9 +14,9 @@ class Basic(unittest.TestCase):
         global localhost
         localhost = h2o.decide_if_localhost()
         if (localhost):
-            h2o.build_cloud(2,java_heap_GB=4,java_extra_args='-XX:+PrintCompilation')
+            h2o.build_cloud(2,java_heap_GB=5)
         else:
-            h2o_hosts.build_cloud_with_hosts(java_extra_args='-XX:+PrintCompilation')
+            h2o_hosts.build_cloud_with_hosts()
 
     @classmethod
     def tearDownClass(cls):
@@ -25,16 +25,14 @@ class Basic(unittest.TestCase):
     def test_GLM_covtype20x(self):
         if localhost:
             csvFilenameList = [
-                ('covtype20x.data', 120, 'cA'),
-                ('covtype20x.data', 120, 'cB'),
-                ('covtype20x.data', 120, 'cC'),
-                ('covtype20x.data', 120, 'cD'),
+                # 68 secs on my laptop?
+                ('covtype20x.data', 480, 'cA'),
                 ]
         else:
             # None is okay for key2
             csvFilenameList = [
-                ('covtype20x.data', 120,'cA'),
-                ('covtype200x.data', 1000,'cE'),
+                ('covtype20x.data', 480,'cA'),
+                # ('covtype200x.data', 1000,'cE'),
                 ]
 
         # a browser window too, just because we can
@@ -47,7 +45,7 @@ class Basic(unittest.TestCase):
             # creates csvFilename.hex from file in importFolder dir 
             start = time.time()
             parseKey = h2i.parseImportFolderFile(None, csvFilename, importFolderPath, 
-                timeoutSecs=2000, key2=key2)
+                timeoutSecs=2000, key2=key2, noise=('JStack', None))
             print "parse end on ", csvPathname, 'took', time.time() - start, 'seconds'
             h2o.check_sandbox_for_errors()
 
@@ -64,7 +62,7 @@ class Basic(unittest.TestCase):
                 x = ""
 
             print "WARNING: max_iter set to 8 for benchmark comparisons"
-            max_iter = 8
+            max_iter = 8 
 
             y = "54"
 
@@ -73,16 +71,16 @@ class Basic(unittest.TestCase):
                 'y': y, 
                 'family': 'binomial',
                 'link': 'logit',
-                'num_cross_validation_folds': 0, 
+                'n_folds': 1, 
                 'case_mode': '=', 
                 'case': 1, 
                 'max_iter': max_iter, 
-                'beta_eps': 1e-3}
+                'beta_epsilon': 1e-3}
 
             # L2 
             kwargs.update({'alpha': 0, 'lambda': 0})
             start = time.time()
-            glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, **kwargs)
+            glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, noise=('JStack', None), **kwargs)
             print "glm (L2) end on ", csvPathname, 'took', time.time() - start, 'seconds'
             h2o_glm.simpleCheckGLM(self, glm, 13, **kwargs)
             h2o.check_sandbox_for_errors()
@@ -90,7 +88,7 @@ class Basic(unittest.TestCase):
             # Elastic
             kwargs.update({'alpha': 0.5, 'lambda': 1e-4})
             start = time.time()
-            glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, **kwargs)
+            glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, noise=('JStack', None), **kwargs)
             print "glm (Elastic) end on ", csvPathname, 'took', time.time() - start, 'seconds'
             h2o_glm.simpleCheckGLM(self, glm, 13, **kwargs)
             h2o.check_sandbox_for_errors()
@@ -98,7 +96,7 @@ class Basic(unittest.TestCase):
             # L1
             kwargs.update({'alpha': 1.0, 'lambda': 1e-4})
             start = time.time()
-            glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, **kwargs)
+            glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, noise=('JStack', None), **kwargs)
             print "glm (L1) end on ", csvPathname, 'took', time.time() - start, 'seconds'
             h2o_glm.simpleCheckGLM(self, glm, 13, **kwargs)
             h2o.check_sandbox_for_errors()

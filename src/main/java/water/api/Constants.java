@@ -15,9 +15,10 @@ public class Constants {
     public static final String HEX = ".hex";
     public static final String JOB = ".job";
     public static final String KMEANS = ".kmeans";
+    public static final String R = ".r";
   }
 
-  public static final String BUILT_IN_KEY_JOBS                 = "__built_in_key_jobs";
+  public static final String BUILT_IN_KEY_JOBS                 = "jobs";
 
   public static final String ALPHA                 = "alpha";
   public static final String ARGUMENTS             = "arguments";
@@ -43,6 +44,7 @@ public class Constants {
   public static final String DESCRIPTION           = "description";
   public static final String DEST_KEY              = "destination_key";
   public static final String DTHRESHOLDS           = "thresholds";
+  public static final String END_TIME              = "end_time";
   public static final String ENUM_DOMAIN_SIZE      = "enum_domain_size";
   public static final String EPSILON               = "epsilon";
   public static final String ERROR                 = "error";
@@ -61,7 +63,6 @@ public class Constants {
   public static final String FJ_THREADS_LO         = "fj_threads_lo";
   public static final String FREE_DISK             = "free_disk" + Suffixes.BYTES;
   public static final String FREE_MEM              = "free_mem" + Suffixes.BYTES;
-  public static final String GINI                  = "gini";
   public static final String HEADER                = "header";
   public static final String HEIGHT                = "height";
   public static final String HELP                  = "help";
@@ -100,6 +101,8 @@ public class Constants {
   public static final String NUM_MISSING_VALUES    = "num_missing_values";
   public static final String NUM_ROWS              = "num_rows";
   public static final String NUM_TREES             = "ntree";
+  public static final String NUM_SUCCEEDED         = "num_succeeded";
+  public static final String NUM_FAILED            = "num_failed";
   public static final String OBJECT                = "object";
   public static final String OFFSET                = "offset";
   public static final String OOBEE                 = "out_of_bag_error_estimate";
@@ -107,6 +110,7 @@ public class Constants {
   public static final String PATH                  = "path";
   public static final String PREVIOUS_MODEL_KEY    = "previous_model_key";
   public static final String PROGRESS              = "progress";
+  public static final String PROGRESS_KEY          = "progress_key";
   public static final String PROGRESS_TOTAL        = "progress_total";
   public static final String REDIRECT              = "redirect_request";
   public static final String REDIRECT_ARGS         = "redirect_request_args";
@@ -120,7 +124,9 @@ public class Constants {
   public static final String RPCS                  = "rpcs";
   public static final String SAMPLE                = "sample";
   public static final String SCALE                 = "scale";
+  public static final String SAMPLING_STRATEGY     = "sampling_strategy";
   public static final String SEED                  = "seed";
+  public static final String SEPARATOR             = "separator";
   public static final String SENT_ROWS             = "sent_rows";
   public static final String SIZE                  = "size";
   public static final String SOURCE_KEY            = "source_key";
@@ -128,9 +134,10 @@ public class Constants {
   public static final String START_TIME            = "start_time";
   public static final String STATUS                = "status";
   public static final String STEP                  = "step";
-  public static final String STRATA                = "strata";
-  public static final String STRATIFY              = "stratify";
+  public static final String STAT_TYPE             = "stat_type";
+  public static final String STRATA_SAMPLES        = "strata_samples";
   public static final String SUCCEEDED             = "succeeded";
+  public static final String SYSTEM_LOAD           = "system_load";
   public static final String TASK_KEY              = "task_key";
   public static final String TCPS_ACTIVE           = "tcps_active";
   public static final String TIME                  = "time";

@@ -1,19 +1,18 @@
 package water.api;
 
-import jsr166y.CountedCompleter;
+import hex.KMeans.KMeansModel;
 import water.*;
-import water.Jobs.Job;
+import water.H2O.H2OCountedCompleter;
 import water.util.RString;
 
-import com.google.gson.JsonObject;
+import com.google.gson.*;
 
 public class KMeans extends Request {
-
   protected final H2OHexKey          _source  = new H2OHexKey(SOURCE_KEY);
   protected final Int                _k       = new Int(K);
   protected final Real               _epsilon = new Real(EPSILON, 1e-6);
   protected final HexAllColumnSelect _columns = new HexAllColumnSelect(COLS, _source);
-  protected final H2OKey             _dest    = new H2OKey(DEST_KEY, (Key) null);
+  protected final H2OKey             _dest    = new H2OKey(DEST_KEY, hex.KMeans.makeKey());
 
   @Override
   protected Response serve() {
@@ -29,30 +28,24 @@ public class KMeans extends Request {
       int dot = n.lastIndexOf('.');
       if( dot > 0 )
         n = n.substring(0, dot);
-      dest = Key.make(hex.KMeans.KMeansModel.KEY_PREFIX + n + Extensions.KMEANS);
+      dest = Key.make(n + Extensions.KMEANS);
     }
 
     final Job job = hex.KMeans.startJob(dest, va, k, epsilon, cols);
     try {
-      H2O.FJP_NORM.submit(new CountedCompleter() {
+      H2O.submitTask(new H2OCountedCompleter() {
         @Override
-        public void compute() {
+        public void compute2() {
           hex.KMeans.run(job, va, k, epsilon, cols);
           tryComplete();
-        }
-
-        @Override
-        public boolean onExceptionalCompletion(Throwable ex, CountedCompleter caller) {
-          ex.printStackTrace();
-          return true;
         }
       });
 
       JsonObject response = new JsonObject();
-      response.addProperty(JOB, job._key.toString());
+      response.addProperty(JOB, job.self().toString());
       response.addProperty(DEST_KEY, dest.toString());
 
-      Response r = Progress.redirect(response, job._key, dest);
+      Response r = Progress.redirect(response, job.self(), dest);
       r.setBuilder(DEST_KEY, new KeyElementBuilder());
       return r;
     } catch( IllegalArgumentException e ) {
@@ -69,5 +62,43 @@ public class KMeans extends Request {
     rs.replace("key", k.toString());
     rs.replace("content", content);
     return rs.toString();
+  }
+
+  static class Builder extends ObjectBuilder {
+    final KMeansModel _m;
+
+    Builder(KMeansModel m) {
+      _m = m;
+    }
+
+    public String build(Response response, JsonObject json, String contextName) {
+      StringBuilder sb = new StringBuilder();
+      modelHTML(_m, json, sb);
+      return sb.toString();
+    }
+
+    private void modelHTML(KMeansModel m, JsonObject json, StringBuilder sb) {
+      JsonArray rows = json.getAsJsonArray(CLUSTERS);
+
+      sb.append("<div class='alert'>Actions: " + KMeansScore.link(m._selfKey,"Validate on another dataset") + ", " + KMeans.link(m._dataKey, "Compute new model") + "</div>");
+      sb.append("<span style='display: inline-block;'>");
+      sb.append("<table class='table table-striped table-bordered'>");
+      sb.append("<tr>");
+      sb.append("<th>Clusters</th>");
+      for( int i = 0; i < m._va._cols.length-1; i++ )
+        sb.append("<th>").append(m._va._cols[i]._name).append("</th>");
+      sb.append("</tr>");
+
+      for( int r = 0; r < rows.size(); r++ ) {
+        sb.append("<tr>");
+        sb.append("<td>").append(r).append("</td>");
+        for( int c = 0; c < m._va._cols.length-1; c++ ) {
+          JsonElement e = rows.get(r).getAsJsonArray().get(c);
+          sb.append("<td>").append(ElementBuilder.format(e.getAsDouble())).append("</td>");
+        }
+        sb.append("</tr>");
+      }
+      sb.append("</table></span>");
+    }
   }
 }

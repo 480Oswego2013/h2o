@@ -6,10 +6,8 @@ import java.util.HashMap;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
-import water.H2O;
-import water.NanoHTTPD;
+import water.*;
 import water.api.Upload.PostFile;
-import H2OInit.Boot;
 
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Closeables;
@@ -50,25 +48,30 @@ public class RequestServer extends NanoHTTPD {
 
     Request.addToNavbar(registerRequest(new RFScore()),     "Random Forest", "Score");
     Request.addToNavbar(registerRequest(new GLMScore()),    "GLM",           "Score");
+    Request.addToNavbar(registerRequest(new KMeansScore()), "KMeans",        "Score");
     Request.addToNavbar(registerRequest(new Score()),       "Apply Model",   "Score");
 
     //Request.addToNavbar(registerRequest(new Plot()),        "Basic",         "Plot");
 
     Request.addToNavbar(registerRequest(new Jobs()),        "Jobs",          "Admin");
-    Request.addToNavbar(registerRequest(new Cloud()),       "Cloud Status",  "Admin");
+    Request.addToNavbar(registerRequest(new Cloud()),       "Cluster Status","Admin");
     Request.addToNavbar(registerRequest(new Timeline()),    "Timeline",      "Admin");
     Request.addToNavbar(registerRequest(new JStack()),      "Stack Dump",    "Admin");
+    Request.addToNavbar(registerRequest(new Debug()),       "Debug Dump",    "Admin");
+    Request.addToNavbar(registerRequest(new LogView()),     "Inspect Log",   "Admin");
     Request.addToNavbar(registerRequest(new Shutdown()),    "Shutdown",      "Admin");
 
     Request.addToNavbar(registerRequest(new Tutorials()),           "View All",      "Tutorials");
     Request.addToNavbar(registerRequest(new TutorialRFIris()),      "Random Forest", "Tutorials");
     Request.addToNavbar(registerRequest(new TutorialGLMProstate()), "GLM",           "Tutorials");
+    Request.addToNavbar(registerRequest(new TutorialKMeans()),      "KMeans",        "Tutorials");
 
     // internal handlers
     registerRequest(new Cancel());
     registerRequest(new Exec());
     registerRequest(new ExportS3Progress());
     registerRequest(new GLMGridProgress());
+    registerRequest(new GLMProgressPage());
     registerRequest(new GetVector());
     registerRequest(new RReaderProgress());
     registerRequest(new PostFile());
@@ -79,12 +82,9 @@ public class RequestServer extends NanoHTTPD {
     registerRequest(new RemoveAck());
     registerRequest(new RFView());
     registerRequest(new RFTreeView());
-    registerRequest(new TypeaheadKeysRequest("Existing H2O Key", ""));
-    registerRequest(new TypeaheadFileRequest());
+    registerRequest(new TypeaheadKeysRequest("Existing H2O Key", "", null));
     registerRequest(new TypeaheadHexKeyRequest());
-    registerRequest(new TypeaheadModelKeyRequest()); // Any Key with "__???Model_??????"
-    registerRequest(new TypeaheadGLMModelKeyRequest());
-    registerRequest(new TypeaheadRFModelKeyRequest());
+    registerRequest(new TypeaheadFileRequest());
     registerRequest(new TypeaheadS3BucketRequest());
     registerRequest(new TypeaheadHdfsPathRequest());
 

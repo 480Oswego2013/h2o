@@ -75,17 +75,17 @@ public class Confusion extends MRTask {
    * @param model the ensemble used to classify
    * @param datakey the key of the data that will be classified
    */
-  private Confusion(RFModel model, Key datakey, int classcol, double[] classWt, boolean computeOOB ) {
+  private Confusion(RFModel model, int treesToUse, Key datakey, int classcol, double[] classWt, boolean computeOOB ) {
     _modelKey = model._selfKey;
     _datakey = datakey;
     _classcol = classcol;
     _classWt = classWt != null && classWt.length > 0 ? classWt : null;
-    _treesUsed = model.size();
+    _treesUsed = treesToUse;
     _computeOOB = computeOOB;
     shared_init();
   }
 
-  public Key keyFor() { return keyFor(_model._selfKey,_model.size(),_datakey, _classcol, _computeOOB); }
+  public Key keyFor() { return keyFor(_model._selfKey,_treesUsed,_datakey, _classcol, _computeOOB); }
   static public Key keyFor(Key modelKey, int msize, Key datakey, int classcol, boolean computeOOB) {
     return Key.make("ConfusionMatrix of (" + datakey+"["+classcol+"],"+modelKey+"["+msize+"],"+(computeOOB?"1":"0")+")");
   }
@@ -103,18 +103,21 @@ public class Confusion extends MRTask {
   /**Apply a model to a dataset to produce a Confusion Matrix.  To support
      incremental & repeated model application, hash the model & data and look
      for that Key to already exist, returning a prior CM if one is available.*/
-  static public Confusion make(RFModel model, Key datakey, int classcol, double[] classWt,boolean computeOOB) {
-    Key key = keyFor(model._selfKey, model.size(), datakey, classcol, computeOOB);
-    Confusion C = UKV.get(key, new Confusion());
+  static public Confusion make(RFModel model, Key datakey, int classcol, double[] classWt, boolean computeOOB) {
+    return make(model, model.size(), datakey, classcol, classWt, computeOOB);
+  }
+  static public Confusion make(RFModel model, int modelSize, Key datakey, int classcol, double[] classWt,boolean computeOOB) {
+    Key key = keyFor(model._selfKey, modelSize, datakey, classcol, computeOOB);
+    Confusion C = UKV.get(key, Confusion.class);
     if( C != null ) {         // Look for a prior cached result
       C.shared_init();
       return C;
     }
 
     // mark that we are computing the matrix now
-    Key progressKey = keyForProgress(model._selfKey, model.size(), datakey, classcol, computeOOB);
+    Key progressKey = keyForProgress(model._selfKey, modelSize, datakey, classcol, computeOOB);
     Value v = DKV.DputIfMatch(progressKey, new Value(progressKey,"IN_PROGRESS"), null, null);
-    C = new Confusion(model,datakey,classcol,classWt,computeOOB);
+    C = new Confusion(model,modelSize,datakey,classcol,classWt,computeOOB);
     if (v != null) { // someone is already working on the matrix, stop
       C._matrix = null;
       return C;
@@ -134,8 +137,8 @@ public class Confusion extends MRTask {
   /** Shared init: for new Confusions, for remote Confusions*/
   private void shared_init() {
     _rand   = Utils.getRNG(0x92b5023f2cd40b7cL); // big random seed
-    _data = ValueArray.value(DKV.get(_datakey));
-    _model = UKV.get(_modelKey, new RFModel());
+    _data = DKV.get(_datakey).get();
+    _model = UKV.get(_modelKey);
     _modelDataMap = _model.columnMapping(_data.colNames());
     assert !_computeOOB || _model._dataKey.equals(_datakey) : !_computeOOB + " || " + _model._dataKey + " equals " + _datakey ;
     Column respModel = _model.response();
@@ -199,10 +202,10 @@ public class Confusion extends MRTask {
     // we trained on during voting.
     for( int ntree = 0; ntree < _model.treeCount(); ntree++ ) {
       long seed = _model.seed(ntree);
-      long init_row = _chunk_row_mapping[nchk];
+      int  init_row = _chunk_row_mapping[nchk];
       /* NOTE: Before changing used generator think about which kind of random generator you need:
        * if always deterministic or non-deterministic version - see hex.rf.Utils.get{Deter}RNG */
-      seed = seed + (init_row<<16);
+      seed = Sampling.chunkSampleSeed(seed, init_row);
       Random rand = Utils.getDeterRNG(seed);
       // Now for all rows, classify & vote!
       ROWS: for( int row = 0; row < rows; row++ ) {
@@ -210,14 +213,23 @@ public class Confusion extends MRTask {
         // of random numbers as in the method Data.sampleFair()
         // Skip row used during training if OOB is computed
         float sampledItem = rand.nextFloat();
-        if( _computeOOB &&  sampledItem < _model._sample ) continue ROWS;
+        if( _computeOOB ) { // if OOBEE is computed then we need to take into account utilized sampling strategy
+          switch( _model._samplingStrategy ) {
+          case RANDOM          : if (sampledItem < _model._sample ) continue ROWS; break;
+          case STRATIFIED_LOCAL:
+            int clazz = (int) _data.data(bits, row, _classcol) - cmin;
+            if (sampledItem < _model._strataSamples[clazz] ) continue ROWS;
+            break;
+          default: assert false : "The selected sampling strategy does not support OOBEE replay!"; break;
+          }
+        }
         // ------
 
         // Bail out of broken rows
         for( int c = 0; c < _modelDataMap.length; c++ )
           if( _data.isNA(bits, row, cols[_modelDataMap[c]])) continue ROWS;
 
-        // Predict with this tree - produce 0-based
+        // Predict with this tree - produce 0-based class index
         int prediction = _model.classify0(ntree, _data, bits, row, _modelDataMap, numClasses );
         if( prediction >= _MODEL_N ) continue ROWS; // Junk row cannot be predicted
         // Check tree miss

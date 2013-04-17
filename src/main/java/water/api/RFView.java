@@ -12,6 +12,9 @@ import com.google.gson.*;
  */
 public class RFView extends /* Progress */ Request {
 
+  /** The number specifies confusion matrix refresh threshold (in percent of trees). */
+  public static final int DEFAULT_CM_REFRESH_TRESHOLD   = 25; // = 25% - means the CM will be generated each 25% of trees has been built
+
   protected final H2OHexKey          _dataKey  = new H2OHexKey(DATA_KEY);
   protected final RFModelKey         _modelKey = new RFModelKey(MODEL_KEY);
   protected final HexKeyClassCol     _classCol = new HexKeyClassCol(CLASS, _dataKey);
@@ -20,9 +23,11 @@ public class RFView extends /* Progress */ Request {
   protected final Bool               _oobee    = new Bool(OOBEE,false,"Out of bag errors");
   protected final Bool               _noCM     = new Bool(NO_CM, false,"Do not produce confusion matrix");
   protected final Bool               _clearCM  = new Bool(JSON_CLEAR_CM, false, "Clear cache of model confusion matrices");
-
+  protected final Int                _refreshTresholdCM = new Int(JSON_REFRESH_TRESHOLD_CM, DEFAULT_CM_REFRESH_TRESHOLD);
+  /** RFView specific parameters names */
   public static final String JSON_CONFUSION_KEY   = "confusion_key";
   public static final String JSON_CLEAR_CM        = "clear_confusion_matrix";
+  public static final String JSON_REFRESH_TRESHOLD_CM = "refresh_treshold_cm";
 
   // JSON keys
   public static final String JSON_CM              = "confusion_matrix";
@@ -33,6 +38,7 @@ public class RFView extends /* Progress */ Request {
   public static final String JSON_CM_CLASS_ERR    = "classification_error";
   public static final String JSON_CM_ROWS         = "rows";
   public static final String JSON_CM_ROWS_SKIPPED = "rows_skipped";
+  public static final String JSON_CM_CLASSES_ERRORS = "classes_errors";
 
   private final static String[] PARAMS_LIST  = new String[] {DATA_KEY, MODEL_KEY, CLASS, NUM_TREES, WEIGHTS, OOBEE, NO_CM, JSON_CLEAR_CM};
   RFView() {
@@ -78,6 +84,10 @@ public class RFView extends /* Progress */ Request {
     r.addProperty(NUM_TREES, model._totalTrees);
     r.addProperty(     MTRY, model._splitFeatures);
     r.addProperty(    OOBEE, _oobee.value());
+    // CM specific options
+    r.addProperty(NO_CM, _noCM.value());
+    r.addProperty(JSON_REFRESH_TRESHOLD_CM, _refreshTresholdCM.value());
+
     return r;
   }
 
@@ -97,13 +107,16 @@ public class RFView extends /* Progress */ Request {
     JsonObject response = defaultJsonResponse();
     // CM return and possible computation is requested
     if (!_noCM.value()) {
-      tasks += 1;
+      //tasks += 1;
+      // Compute the highest number of trees which is less then a threshold
+      int modelSize = tasks * _refreshTresholdCM.value()/100;
+      modelSize     = modelSize == 0 || finished==tasks ? finished : modelSize * (finished/modelSize);
       // Get the confusion matrix
-      Confusion confusion = Confusion.make(model, _dataKey.value()._key, _classCol.value(), weights, _oobee.value());
+      Confusion confusion = Confusion.make(model, modelSize, _dataKey.value()._key, _classCol.value(), weights, _oobee.value());
       response.addProperty(JSON_CONFUSION_KEY, confusion.keyFor().toString());
       // if the matrix is valid, report it in the JSON
-      if (confusion.isValid() && finished > 0) {
-        finished += 1;
+      if (confusion.isValid() && modelSize > 0) {
+        //finished += 1;
         JsonObject cm = new JsonObject();
         JsonArray cmHeader = new JsonArray();
         JsonArray matrix = new JsonArray();
@@ -117,12 +130,19 @@ public class RFView extends /* Progress */ Request {
         cm.add(JSON_CM_HEADER,cmHeader);
         // add the matrix
         final int nclasses = confusion.dimension();
+        JsonArray classErrors = new JsonArray();
         for (int crow = 0; crow < nclasses; ++crow) {
-          JsonArray row = new JsonArray();
-          for (int ccol = 0; ccol < nclasses; ++ccol)
+          JsonArray row  = new JsonArray();
+          int classHitScore = 0;
+          for (int ccol = 0; ccol < nclasses; ++ccol) {
             row.add(new JsonPrimitive(confusion._matrix[crow][ccol]));
+            if (crow!=ccol) classHitScore += confusion._matrix[crow][ccol];
+          }
+          // produce infinity members in case of 0.f/0
+          classErrors.add(new JsonPrimitive((float)classHitScore / (classHitScore + confusion._matrix[crow][crow])));
           matrix.add(row);
         }
+        cm.add(JSON_CM_CLASSES_ERRORS, classErrors);
         cm.add(JSON_CM_MATRIX,matrix);
         cm.addProperty(JSON_CM_TREES,confusion._treesUsed);
         response.add(JSON_CM,cm);
@@ -139,7 +159,11 @@ public class RFView extends /* Progress */ Request {
     response.add(Constants.TREES,trees);
 
     // Build a response
-    Response r = (finished == tasks) ? jobDone(response) : Response.poll(response, finished, tasks);
+    Response r;
+    if (finished == tasks) {
+      r = jobDone(response);
+      r.addHeader("<div class='alert'>" + RFScore.link(model._selfKey, MODEL_KEY, "Use this model for scoring.") + " </div>");
+    } else { r = Response.poll(response, finished, tasks);  }
     r.setBuilder(JSON_CM, new ConfusionMatrixBuilder());
     r.setBuilder(TREES, new TreeListBuilder());
     return r;

@@ -4,13 +4,15 @@ import hex.rng.*;
 import hex.rng.H2ORandomRNG.RNGKind;
 import hex.rng.H2ORandomRNG.RNGType;
 
-import java.io.Closeable;
-import java.io.IOException;
+import java.io.*;
 import java.net.Socket;
 import java.security.SecureRandom;
 import java.text.DecimalFormat;
 import java.util.Arrays;
 import java.util.Random;
+
+import water.*;
+import water.parser.ParseDataset;
 
 public class Utils {
 
@@ -214,4 +216,72 @@ public class Utils {
   public static void close(Socket s) {
     try { if( s != null ) s.close(); } catch( IOException _ ) { }
   }
+
+  public static String readConsole() {
+    BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
+    try {
+      return console.readLine();
+    } catch( IOException e ) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public static File tempFile(String content) {
+    File file;
+    FileWriter w = null;
+    try {
+      file = File.createTempFile("h2o", null);
+      w = new FileWriter(file);
+      w.write(content);
+    } catch(IOException ex) {
+      throw new RuntimeException(ex);
+    } finally {
+      if(w != null) {
+        try {
+          w.close();
+        } catch(IOException _) {
+        }
+      }
+    }
+    return file;
+  }
+
+  public static String join(char sep, Object[] array) {
+    String s = "";
+    for( Object o : array )
+      s += (s.length() == 0 ? "" : sep) + o.toString();
+    return s;
+  }
+
+  public static void clearFolder(String folder) {
+    clearFolder(new File(folder));
+  }
+
+  public static void clearFolder(File folder) {
+    if (folder.exists()) {
+      for (File child : folder.listFiles()) {
+        if (child.isDirectory())
+          clearFolder(child);
+
+        if (!child.delete())
+          throw new RuntimeException("Cannot delete " + child);
+      }
+    }
+  }
+
+  public static ValueArray loadAndParseKey(String path) {
+    return loadAndParseKey(Key.make(), path);
+  }
+
+  public static ValueArray loadAndParseKey(Key okey, String path) {
+    FileIntegrityChecker c = FileIntegrityChecker.check(new File(path));
+    Futures fs = new Futures();
+    Key k = c.importFile(0, fs);
+    fs.blockForPending();
+    ParseDataset.parse(okey, new Key[]{k});
+    UKV.remove(k);
+    ValueArray res = DKV.get(okey).get();
+    return res;
+  }
+
 }

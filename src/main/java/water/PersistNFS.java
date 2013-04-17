@@ -53,6 +53,7 @@ public abstract class PersistNFS {
         if( s != null ) s.close();
       }
     } catch( IOException e ) { // Broken disk / short-file???
+      H2O.ignore(e);
       return null;
     }
   }
@@ -64,13 +65,13 @@ public abstract class PersistNFS {
     // A perhaps useless cutout: the upper layers should test this first.
     if( v.isPersisted() ) return;
     // Never store arraylets on NFS, instead we'll store the entire array.
-    assert v._isArray==0;
+    assert !v.isArray();
     try {
       File f = getFileForKey(v._key);
       f.mkdirs();
       FileOutputStream s = new FileOutputStream(f);
       try {
-        byte[] m = v.mem();
+        byte[] m = v.memOrLoad();
         assert (m == null || m.length == v._max); // Assert not saving partial files
         if( m!=null )
           s.write(m);
@@ -79,6 +80,7 @@ public abstract class PersistNFS {
         s.close();
       }
     } catch( IOException e ) {
+      H2O.ignore(e);
     }
   }
 

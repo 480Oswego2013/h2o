@@ -2,13 +2,13 @@ import unittest
 import random, sys, time
 sys.path.extend(['.','..','py'])
 
-import h2o, h2o_cmd, h2o_glm
+import h2o, h2o_cmd, h2o_glm, h2o_hosts
 
 def define_params():
     paramDict = {
         'x': [0,1,15,33,34],
         'family': ['poisson'],
-        'num_cross_validation_folds': [2,3,4,9],
+        'n_folds': [2,3,4,9],
         'thresholds': [0.1, 0.5, 0.7, 0.9],
         'lambda': [1e-8, 1e-4],
         'alpha': [0,0.5,0.75],
@@ -29,7 +29,12 @@ class Basic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        h2o.build_cloud(node_count=1)
+        global localhost
+        localhost = h2o.decide_if_localhost()
+        if (localhost):
+            h2o.build_cloud(node_count=1)
+        else:
+            h2o_hosts.build_cloud_with_hosts(node_count=1)
 
     @classmethod
     def tearDownClass(cls):
@@ -52,11 +57,11 @@ class Basic(unittest.TestCase):
             # FIX! does it never end if we don't have alpha specified?
             params = {
                 'y': 54, 
-                'num_cross_validation_folds': 3, 
+                'n_folds': 3, 
                 'family': "poisson", 
                 'alpha': 0.5, 
                 'lambda': 1e-4, 
-                'beta_eps': 0.001, 
+                'beta_epsilon': 0.001, 
                 'max_iter': 30
                 }
 
@@ -64,7 +69,7 @@ class Basic(unittest.TestCase):
             kwargs = params.copy()
 
             # make timeout bigger with xvals
-            timeoutSecs = 60 + (kwargs['num_cross_validation_folds']*20)
+            timeoutSecs = 60 + (kwargs['n_folds']*20)
             # or double the 4 seconds per iteration (max_iter+1 worst case?)
             timeoutSecs = max(timeoutSecs, (8 * (kwargs['max_iter']+1)))
 
@@ -72,9 +77,7 @@ class Basic(unittest.TestCase):
             glm = h2o_cmd.runGLMOnly(timeoutSecs=timeoutSecs, parseKey=parseKey, **kwargs)
             print "glm end on ", csvPathname, 'took', time.time() - start, 'seconds'
 
-            start = time.time()
             h2o_glm.simpleCheckGLM(self, glm, None, **kwargs)
-            print "simpleCheckGLM end on ", csvPathname, 'took', time.time() - start, 'seconds'
             print "Trial #", trial, "completed\n"
 
 
