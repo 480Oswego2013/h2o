@@ -4,38 +4,6 @@ import h2o, h2o_cmd, h2o_browse as h2b, h2o_import as h2i, h2o_hosts
 import h2o_jobs 
 import logging 
 
-def check_enums_from_inspect(parseKey):
-    inspect = h2o_cmd.runInspect(key=parseKey['destination_key'])
-    print "num_rows:", inspect['num_rows']
-    print "num_cols:", inspect['num_cols']
-    cols = inspect['cols']
-    # trying to see how many enums we get
-    # don't print int
-    for i,c in enumerate(cols):
-        # print i, "name:", c['name']
-        msg = "column %d" % i
-        msg = msg + " type: %s" % c['type']
-        if c['type'] == 'enum':
-            msg = msg + (" enum_domain_size: %d" % c['enum_domain_size'])
-        if c['num_missing_values'] != 0:
-            msg = msg + (" num_missing_values: %s" % c['num_missing_values'])
-
-        if c['type'] != 'int' or (c['num_missing_values'] != 0):
-            print msg
-
-def delete_csv_key(csvFilename, importFullList):
-    # remove the original data key
-    for k in importFullList:
-        deleteKey = k['key']
-        ### print "possible delete:", deleteKey
-        # don't delete any ".hex" keys. the parse results above have .hex
-        # this is the name of the multi-file (it comes in as a single file?)
-        if csvFilename in deleteKey and not '.hex' in deleteKey:
-            print "\nRemoving", deleteKey
-            removeKeyResult = h2o.nodes[0].remove_key(key=deleteKey)
-            ### print "removeKeyResult:", h2o.dump_json(removeKeyResult)
-
-
 class Basic(unittest.TestCase):
     def tearDown(self):
         h2o.check_sandbox_for_errors()
@@ -55,10 +23,10 @@ class Basic(unittest.TestCase):
         avgSynSize = 4020000
         avgAzSize = 75169317 # bytes
         csvFilenameList = [
-            ("to-delete-soon/a", "a_1.dat", 1 * avgAzSize, 300),
-            ("to-delete-soon/[abcdefghij]", "a_10.dat", 1 * avgAzSize, 300),
-            ("to-delete-soon/[a-v]", "b_20.dat", 20 * avgAzSize, 800),
-            ("to-delete-soon/[a-z]", "a_24.dat", 24 * avgAzSize, 900),
+            ("a", "a_1.dat", 1 * avgAzSize, 300),
+            ("[a-j]", "a_10.dat", 10 * avgAzSize, 300),
+            ("[k-v]", "b_10.dat", 10 * avgAzSize, 800),
+            ("[w-z]", "c_4.dat", 4 * avgAzSize, 900),
             # ("manyfiles-nflx-gz/file_1.dat.gz", "file_1.dat.gz", 1 * avgMichalSize, 300),
             # ("manyfiles-nflx-gz/file_[2][0-9].dat.gz", "file_10.dat.gz", 10 * avgMichalSize, 700),
             # ("manyfiles-nflx-gz/file_[34][0-9].dat.gz", "file_20.dat.gz", 20 * avgMichalSize, 900),
@@ -72,14 +40,14 @@ class Basic(unittest.TestCase):
         # want just s3n://home-0xdiag-datasets/manyfiles-nflx-gz/file_1.dat.gz
     
         USE_S3 = False
-        noPoll = False
+        noPoll = True
         benchmarkLogging = ['cpu','disk']
-        bucket = "home-0xdiag-datasets"
+        bucket = "to-delete-soon"
         if USE_S3:
-            URI = "s3://home-0xdiag-datasets"
+            URI = "s3://to-delete-soon"
             protocol = "s3"
         else:
-            URI = "s3n://home-0xdiag-datasets"
+            URI = "s3n://to-delete-soon"
             protocol = "s3n/hdfs"
 
         # split out the pattern match and the filename used for the hex
@@ -136,27 +104,29 @@ class Basic(unittest.TestCase):
                         benchmarkLogging=benchmarkLogging)
 
                     if noPoll:
-                        time.sleep(1)
-                        h2o.check_sandbox_for_errors()
-                        (csvFilepattern, csvFilename, totalBytes2, timeoutSecs) = csvFilenameList[i+1]
-                        s3nKey = URI + "/" + csvFilepattern
-                        key2 = csvFilename + "_" + str(trial) + ".hex"
-                        print "Loading", protocol, "key:", s3nKey, "to", key2
-                        parse2Key = h2o.nodes[0].parse(s3nKey, key2,
-                            timeoutSecs=timeoutSecs, retryDelaySecs=10, pollTimeoutSecs=60,
-                            noPoll=noPoll,
-                            benchmarkLogging=benchmarkLogging)
+                        if (i+1) < len(csvFilenameList): 
+                            time.sleep(1)
+                            h2o.check_sandbox_for_errors()
+                            (csvFilepattern, csvFilename, totalBytes2, timeoutSecs) = csvFilenameList[i+1]
+                            s3nKey = URI + "/" + csvFilepattern
+                            key2 = csvFilename + "_" + str(trial) + ".hex"
+                            print "Loading", protocol, "key:", s3nKey, "to", key2
+                            parse2Key = h2o.nodes[0].parse(s3nKey, key2,
+                                timeoutSecs=timeoutSecs, retryDelaySecs=10, pollTimeoutSecs=60,
+                                noPoll=noPoll,
+                                benchmarkLogging=benchmarkLogging)
 
-                        time.sleep(1)
-                        h2o.check_sandbox_for_errors()
-                        (csvFilepattern, csvFilename, totalBytes3, timeoutSecs) = csvFilenameList[i+2]
-                        s3nKey = URI + "/" + csvFilepattern
-                        key2 = csvFilename + "_" + str(trial) + ".hex"
-                        print "Loading", protocol, "key:", s3nKey, "to", key2
-                        parse3Key = h2o.nodes[0].parse(s3nKey, key2,
-                            timeoutSecs=timeoutSecs, retryDelaySecs=10, pollTimeoutSecs=60,
-                            noPoll=noPoll,
-                            benchmarkLogging=benchmarkLogging)
+                        if (i+2) < len(csvFilenameList): 
+                            time.sleep(1)
+                            h2o.check_sandbox_for_errors()
+                            (csvFilepattern, csvFilename, totalBytes3, timeoutSecs) = csvFilenameList[i+2]
+                            s3nKey = URI + "/" + csvFilepattern
+                            key2 = csvFilename + "_" + str(trial) + ".hex"
+                            print "Loading", protocol, "key:", s3nKey, "to", key2
+                            parse3Key = h2o.nodes[0].parse(s3nKey, key2,
+                                timeoutSecs=timeoutSecs, retryDelaySecs=10, pollTimeoutSecs=60,
+                                noPoll=noPoll,
+                                benchmarkLogging=benchmarkLogging)
 
                     elapsed = time.time() - start
                     print s3nKey, 'parse time:', parseKey['response']['time']
@@ -186,7 +156,7 @@ class Basic(unittest.TestCase):
                     # BUG here?
                     if not noPoll:
                         # We should be able to see the parse result?
-                        check_enums_from_inspect(parseKey)
+                        h2o_cmd.check_enums_from_inspect(parseKey)
 
                     print "Deleting key in H2O so we get it from S3 (if ec2) or nfs again.", \
                           "Otherwise it would just parse the cached key."
@@ -198,7 +168,7 @@ class Basic(unittest.TestCase):
                     # we're deleting the keys in the initial import. We leave the keys we created
                     # by the parse. We use unique dest keys for those, so no worries.
                     # Leaving them is good because things fill up! (spill)
-                    delete_csv_key(csvFilename, s3nFullList)
+                    h2o_cmd.delete_csv_key(csvFilename, s3nFullList)
 
                 h2o.tear_down_cloud()
                 # sticky ports? wait a bit.

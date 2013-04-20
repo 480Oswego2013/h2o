@@ -1,43 +1,13 @@
 import unittest, sys, random, time
 sys.path.extend(['.','..','py'])
-import h2o, h2o_cmd, h2o_browse as h2b, h2o_import as h2i, h2o_hosts
+import h2o, h2o_cmd, h2o_browse as h2b, h2o_import as h2i, h2o_hosts, h2o_glm
 import h2o_jobs
 import logging
 
-def check_enums_from_inspect(parseKey):
-    inspect = h2o_cmd.runInspect(key=parseKey['destination_key'])
-    print "num_rows:", inspect['num_rows']
-    print "num_cols:", inspect['num_cols']
-    cols = inspect['cols']
-    # trying to see how many enums we get
-    # don't print int
-    for i,c in enumerate(cols):
-        # print i, "name:", c['name']
-        msg = "column %d" % i
-        msg = msg + " type: %s" % c['type']
-        if c['type'] == 'enum':
-            msg = msg + (" enum_domain_size: %d" % c['enum_domain_size'])
-        if c['num_missing_values'] != 0:
-            msg = msg + (" num_missing_values: %s" % c['num_missing_values'])
-
-        if c['type'] != 'int' or (c['num_missing_values'] != 0):
-            print msg
-
-def delete_csv_key(csvFilename, importFullList):
-    # remove the original data key
-    for k in importFullList:
-        deleteKey = k['key']
-        ### print "possible delete:", deleteKey
-        # don't delete any ".hex" keys. the parse results above have .hex
-        # this is the name of the multi-file (it comes in as a single file?)
-        if csvFilename in deleteKey and not '.hex' in deleteKey:
-            print "\nRemoving", deleteKey
-            removeKeyResult = h2o.nodes[0].remove_key(key=deleteKey)
-            ### print "removeKeyResult:", h2o.dump_json(removeKeyResult)
-
-
 class Basic(unittest.TestCase):
     def tearDown(self):
+        ### print "FAILED: waiting for you to terminate after looking at things"
+        ### time.sleep(360000)
         h2o.check_sandbox_for_errors()
 
     @classmethod
@@ -63,22 +33,25 @@ class Basic(unittest.TestCase):
             # ("syn_datasets/syn_7350063254201195578_10000x200.csv_000[23][0-9]", "syn_20.csv", 20 * avgSynSize, 700),
             # ("syn_datasets/syn_7350063254201195578_10000x200.csv_000[45678][0-9]", "syn_50.csv", 50 * avgSynSize, 700),
 
-            # ("manyfiles-nflx-gz/file_1.dat.gz", "file_1.dat.gz", 1 * avgMichalSize, 300),
-            # ("manyfiles-nflx-gz/file_[2][0-9].dat.gz", "file_10.dat.gz", 10 * avgMichalSize, 700),
-            # ("manyfiles-nflx-gz/file_[34][0-9].dat.gz", "file_20.dat.gz", 20 * avgMichalSize, 900),
+            ("manyfiles-nflx-gz/file_1.dat.gz", "file_1.dat.gz", 1 * avgMichalSize, 300),
+            ("manyfiles-nflx-gz/file_[2][0-9].dat.gz", "file_10.dat.gz", 10 * avgMichalSize, 700),
+            ("manyfiles-nflx-gz/file_[34][0-9].dat.gz", "file_20.dat.gz", 20 * avgMichalSize, 900),
 
-            ("manyfiles-nflx-gz/file_[12][0-9][0-9].dat.gz", "file_200_A.dat.gz", 100 * avgMichalSize, 2400),
-            ("manyfiles-nflx-gz/file_[12][0-9][0-9].dat.gz", "file_200_B.dat.gz", 100 * avgMichalSize, 2400),
-            ("manyfiles-nflx-gz/file_1[0-9][0-9].dat.gz", "file_100_A.dat.gz", 100 * avgMichalSize, 2400),
-            ("manyfiles-nflx-gz/file_2[0-9][0-9].dat.gz", "file_100_B.dat.gz", 100 * avgMichalSize, 2400),
-            ("manyfiles-nflx-gz/file_[5-9][0-9].dat.gz", "file_50_A.dat.gz", 50 * avgMichalSize, 1800),
-            ("manyfiles-nflx-gz/file_1[0-4][0-9].dat.gz", "file_50_B.dat.gz", 50 * avgMichalSize, 1800),
-            ("manyfiles-nflx-gz/file_1[5-9][0-9].dat.gz", "file_50_C.dat.gz", 50 * avgMichalSize, 1800),
+            ("manyfiles-nflx-gz/file_[123][0-9][0-9].dat.gz", "file_300_A.dat.gz", 300 * avgMichalSize, 3600),
+            ("manyfiles-nflx-gz/file_[123][0-9][0-9].dat.gz", "file_300_B.dat.gz", 300 * avgMichalSize, 3600),
+            ("manyfiles-nflx-gz/file_[123][0-9][0-9].dat.gz", "file_300_C.dat.gz", 300 * avgMichalSize, 3600),
+            ("manyfiles-nflx-gz/file_[5-9][0-9].dat.gz", "file_50_A.dat.gz", 50 * avgMichalSize, 3600),
+            ("manyfiles-nflx-gz/file_1[0-4][0-9].dat.gz", "file_50_B.dat.gz", 50 * avgMichalSize, 3600),
+            ("manyfiles-nflx-gz/file_1[0-9][0-9].dat.gz", "file_100_A.dat.gz", 100 * avgMichalSize, 3600),
+            ("manyfiles-nflx-gz/file_2[0-9][0-9].dat.gz", "file_100_B.dat.gz", 100 * avgMichalSize, 3600),
+            ("manyfiles-nflx-gz/file_[12][0-9][0-9].dat.gz", "file_200_A.dat.gz", 200 * avgMichalSize, 3600),
+            ("manyfiles-nflx-gz/file_[12][0-9][0-9].dat.gz", "file_200_B.dat.gz", 200 * avgMichalSize, 3600),
         ]
 
         print "Using the -.gz files from s3"
         # want just s3n://home-0xdiag-datasets/manyfiles-nflx-gz/file_1.dat.gz
     
+        DO_GLM = True
         USE_S3 = False
         noPoll = False
         benchmarkLogging = ['cpu','disk']
@@ -92,10 +65,12 @@ class Basic(unittest.TestCase):
 
         # split out the pattern match and the filename used for the hex
         trialMax = 1
+        pollTimeoutSecs = 180
+        retryDelaySecs = 10
         # use i to forward reference in the list, so we can do multiple outstanding parses below
         for i, (csvFilepattern, csvFilename, totalBytes, timeoutSecs) in enumerate(csvFilenameList):
             ## for tryHeap in [54, 28]:
-            for tryHeap in [54]:
+            for tryHeap in [30]:
                 
                 print "\n", tryHeap,"GB heap, 1 jvm per host, import", protocol, "then parse"
                 h2o_hosts.build_cloud_with_hosts(node_count=1, java_heap_GB=tryHeap,
@@ -139,32 +114,40 @@ class Basic(unittest.TestCase):
                     print "Loading", protocol, "key:", s3nKey, "to", key2
                     start = time.time()
                     parseKey = h2o.nodes[0].parse(s3nKey, key2,
-                        timeoutSecs=timeoutSecs, retryDelaySecs=10, pollTimeoutSecs=180,
+                        timeoutSecs=timeoutSecs, 
+                        retryDelaySecs=retryDelaySecs,
+                        pollTimeoutSecs=pollTimeoutSecs,
                         noPoll=noPoll,
                         benchmarkLogging=benchmarkLogging)
 
                     if noPoll:
-                        time.sleep(1)
-                        h2o.check_sandbox_for_errors()
-                        (csvFilepattern, csvFilename, totalBytes2, timeoutSecs) = csvFilenameList[i+1]
-                        s3nKey = URI + "/" + csvFilepattern
-                        key2 = csvFilename + "_" + str(trial) + ".hex"
-                        print "Loading", protocol, "key:", s3nKey, "to", key2
-                        parse2Key = h2o.nodes[0].parse(s3nKey, key2,
-                            timeoutSecs=timeoutSecs, retryDelaySecs=10, pollTimeoutSecs=60,
-                            noPoll=noPoll,
-                            benchmarkLogging=benchmarkLogging)
+                        if (i+1) < len(csvFilenameList):
+                            time.sleep(1)
+                            h2o.check_sandbox_for_errors()
+                            (csvFilepattern, csvFilename, totalBytes2, timeoutSecs) = csvFilenameList[i+1]
+                            s3nKey = URI + "/" + csvFilepattern
+                            key2 = csvFilename + "_" + str(trial) + ".hex"
+                            print "Loading", protocol, "key:", s3nKey, "to", key2
+                            parse2Key = h2o.nodes[0].parse(s3nKey, key2,
+                                timeoutSecs=timeoutSecs,
+                                retryDelaySecs=retryDelaySecs,
+                                pollTimeoutSecs=pollTimeoutSecs,
+                                noPoll=noPoll,
+                                benchmarkLogging=benchmarkLogging)
 
-                        time.sleep(1)
-                        h2o.check_sandbox_for_errors()
-                        (csvFilepattern, csvFilename, totalBytes3, timeoutSecs) = csvFilenameList[i+2]
-                        s3nKey = URI + "/" + csvFilepattern
-                        key2 = csvFilename + "_" + str(trial) + ".hex"
-                        print "Loading", protocol, "key:", s3nKey, "to", key2
-                        parse3Key = h2o.nodes[0].parse(s3nKey, key2,
-                            timeoutSecs=timeoutSecs, retryDelaySecs=10, pollTimeoutSecs=60,
-                            noPoll=noPoll,
-                            benchmarkLogging=benchmarkLogging)
+                        if (i+2) < len(csvFilenameList):
+                            time.sleep(1)
+                            h2o.check_sandbox_for_errors()
+                            (csvFilepattern, csvFilename, totalBytes3, timeoutSecs) = csvFilenameList[i+2]
+                            s3nKey = URI + "/" + csvFilepattern
+                            key2 = csvFilename + "_" + str(trial) + ".hex"
+                            print "Loading", protocol, "key:", s3nKey, "to", key2
+                            parse3Key = h2o.nodes[0].parse(s3nKey, key2,
+                                timeoutSecs=timeoutSecs, 
+                                retryDelaySecs=retryDelaySecs,
+                                pollTimeoutSecs=pollTimeoutSecs,
+                                noPoll=noPoll,
+                                benchmarkLogging=benchmarkLogging)
 
                     elapsed = time.time() - start
                     print s3nKey, 'parse time:', parseKey['response']['time']
@@ -194,11 +177,53 @@ class Basic(unittest.TestCase):
                     # BUG here?
                     if not noPoll:
                         # We should be able to see the parse result?
-                        check_enums_from_inspect(parseKey)
+                        h2o_cmd.check_enums_from_inspect(parseKey)
+
+                    #**********************************************************************************
+                    # Do GLM too
+                    # these are all the columns that are enums in the dataset...too many for GLM!
+                    x = range(542) # don't include the output column
+                    x.remove(3)
+                    x.remove(4)
+                    x.remove(5)
+                    x.remove(6)
+                    x.remove(7)
+                    x.remove(8)
+                    x.remove(9)
+                    x.remove(10)
+                    x.remove(11)
+                    x.remove(14)
+                    x.remove(16)
+                    x.remove(17)
+                    x.remove(18)
+                    x.remove(19)
+                    x.remove(20)
+                    x.remove(424)
+                    x.remove(425)
+                    x.remove(426)
+                    x.remove(540)
+                    x.remove(541)
+                    # remove the output too!
+                    x.remove(378)
+                    x = ",".join(map(str,x))
+
+                    # Argument case error: Value 0.0 is not between 12.0 and 9987.0 (inclusive)
+                    if DO_GLM:
+                        GLMkwargs = {'x': x, 'y': 378, 'case': 15, 'case_mode': '>', 
+                            'max_iter': 10, 'n_folds': 1, 'alpha': 0.2, 'lambda': 1e-5}
+                        start = time.time()
+                        glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, **GLMkwargs)
+                        h2o_glm.simpleCheckGLM(self, glm, None, **GLMkwargs)
+                        elapsed = time.time() - start
+                        h2o.check_sandbox_for_errors()
+                        l = '{:d} jvms, {:d}GB heap, {:s} {:s} GLM: {:6.2f} secs'.format(
+                            len(h2o.nodes), tryHeap, csvFilepattern, csvFilename, elapsed)
+                        print l
+                        h2o.cloudPerfH2O.message(l)
+                    #**********************************************************************************
 
                     print "Deleting key in H2O so we get it from S3 (if ec2) or nfs again.", \
                           "Otherwise it would just parse the cached key."
-
                     storeView = h2o.nodes[0].store_view()
                     ### print "storeView:", h2o.dump_json(storeView)
                     # "key": "s3n://home-0xdiag-datasets/manyfiles-nflx-gz/file_84.dat.gz"
@@ -206,7 +231,7 @@ class Basic(unittest.TestCase):
                     # we're deleting the keys in the initial import. We leave the keys we created
                     # by the parse. We use unique dest keys for those, so no worries.
                     # Leaving them is good because things fill up! (spill)
-                    delete_csv_key(csvFilename, s3nFullList)
+                    h2o_cmd.delete_csv_key(csvFilename, s3nFullList)
 
                 h2o.tear_down_cloud()
                 # sticky ports? wait a bit.

@@ -4,38 +4,6 @@ import h2o, h2o_cmd,h2o_hosts, h2o_browse as h2b, h2o_import as h2i, h2o_hosts
 import h2o_exec as h2e, h2o_jobs
 import time, random, logging
 
-
-def check_enums_from_inspect(parseKey):
-    inspect = h2o_cmd.runInspect(key=parseKey['destination_key'])
-    print "num_rows:", inspect['num_rows']
-    print "num_cols:", inspect['num_cols']
-    cols = inspect['cols']
-    # trying to see how many enums we get
-    # don't print int
-    for i,c in enumerate(cols):
-        # print i, "name:", c['name']
-        msg = "column %d" % i
-        msg = msg + " type: %s" % c['type']
-        if c['type'] == 'enum':
-            msg = msg + (" enum_domain_size: %d" % c['enum_domain_size'])
-        if c['num_missing_values'] != 0:
-            msg = msg + (" num_missing_values: %s" % c['num_missing_values'])
-
-        if c['type'] != 'int' or (c['num_missing_values'] != 0):
-            print msg
-
-def delete_csv_key(csvFilename, importFullList):
-    # remove the original data key
-    for k in importFullList:
-        deleteKey = k['key']
-        ### print "possible delete:", deleteKey
-        # don't delete any ".hex" keys. the parse results above have .hex
-        # this is the name of the multi-file (it comes in as a single file?)
-        if csvFilename in deleteKey and not '.hex' in deleteKey:
-            print "\nRemoving", deleteKey
-            removeKeyResult = h2o.nodes[0].remove_key(key=deleteKey)
-            ### print "removeKeyResult:", h2o.dump_json(removeKeyResult)
-
 class Basic(unittest.TestCase):
     def tearDown(self):
         h2o.check_sandbox_for_errors()
@@ -49,15 +17,6 @@ class Basic(unittest.TestCase):
         h2o.tear_down_cloud()
 
     def test_benchmark_import(self):
-        # just do the import folder once
-        # importFolderPath = "/home/hduser/hdfs_datasets"
-
-        #    "covtype169x.data",
-        #    "covtype.13x.shuffle.data",
-        #    "3G_poker_shuffle"
-        #    "covtype20x.data", 
-        #    "billion_rows.csv.gz",
-
         # typical size of the michal files
         avgMichalSizeUncompressed = 237270000 
         avgMichalSize = 116561140 
@@ -120,7 +79,6 @@ class Basic(unittest.TestCase):
         # csvFilenameList = random.sample(csvFilenameAll,1)
         csvFilenameList = csvFilenameAll
 
-
         # split out the pattern match and the filename used for the hex
         trialMax = 1
         # rebuild the cloud for each file
@@ -129,6 +87,8 @@ class Basic(unittest.TestCase):
         # can fire a parse off and go wait on the jobs queue (inspect afterwards is enough?)
         noPoll = False
         benchmarkLogging = ['cpu','disk']
+        pollTimeoutSecs = 120
+        retryDelaySecs = 10
 
         for (csvFilepattern, csvFilename, totalBytes, timeoutSecs) in csvFilenameList:
             localhost = h2o.decide_if_localhost()
@@ -156,32 +116,40 @@ class Basic(unittest.TestCase):
                 h2o.cloudPerfH2O.message("Parse " + csvFilename + " Start--------------------------------")
                 start = time.time()
                 parseKey = h2i.parseImportFolderFile(None, csvFilepattern, importFolderPath, 
-                    key2=csvFilename + ".hex", timeoutSecs=timeoutSecs, retryDelaySecs=5, 
+                    key2=csvFilename + ".hex", timeoutSecs=timeoutSecs, 
+                    retryDelaySecs=retryDelaySecs,
+                    pollTimeoutSecs=pollTimeoutSecs,
                     noPoll=noPoll,
                     benchmarkLogging=benchmarkLogging)
 
                 if noPoll:
-                    time.sleep(1)
-                    h2o.check_sandbox_for_errors()
-                    (csvFilepattern, csvFilename, totalBytes2, timeoutSecs) = csvFilenameList[i+1]
-                    s3nKey = URI + "/" + csvFilepattern
-                    key2 = csvFilename + "_" + str(trial) + ".hex"
-                    print "Loading", protocol, "key:", s3nKey, "to", key2
-                    parse2Key = h2o.nodes[0].parse(s3nKey, key2,
-                        timeoutSecs=timeoutSecs, retryDelaySecs=10, pollTimeoutSecs=60,
-                        noPoll=noPoll,
-                        benchmarkLogging=benchmarkLogging)
+                    if (i+1) < len(csvFilenameList):
+                        time.sleep(1)
+                        h2o.check_sandbox_for_errors()
+                        (csvFilepattern, csvFilename, totalBytes2, timeoutSecs) = csvFilenameList[i+1]
+                        s3nKey = URI + "/" + csvFilepattern
+                        key2 = csvFilename + "_" + str(trial) + ".hex"
+                        print "Loading", protocol, "key:", s3nKey, "to", key2
+                        parse2Key = h2o.nodes[0].parse(s3nKey, key2,
+                            timeoutSecs=timeoutSecs,
+                            retryDelaySecs=retryDelaySecs,
+                            pollTimeoutSecs=pollTimeoutSecs,
+                            noPoll=noPoll,
+                            benchmarkLogging=benchmarkLogging)
 
-                    time.sleep(1)
-                    h2o.check_sandbox_for_errors()
-                    (csvFilepattern, csvFilename, totalBytes3, timeoutSecs) = csvFilenameList[i+2]
-                    s3nKey = URI + "/" + csvFilepattern
-                    key2 = csvFilename + "_" + str(trial) + ".hex"
-                    print "Loading", protocol, "key:", s3nKey, "to", key2
-                    parse3Key = h2o.nodes[0].parse(s3nKey, key2,
-                        timeoutSecs=timeoutSecs, retryDelaySecs=10, pollTimeoutSecs=60,
-                        noPoll=noPoll,
-                        benchmarkLogging=benchmarkLogging)
+                    if (i+2) < len(csvFilenameList):
+                        time.sleep(1)
+                        h2o.check_sandbox_for_errors()
+                        (csvFilepattern, csvFilename, totalBytes3, timeoutSecs) = csvFilenameList[i+2]
+                        s3nKey = URI + "/" + csvFilepattern
+                        key2 = csvFilename + "_" + str(trial) + ".hex"
+                        print "Loading", protocol, "key:", s3nKey, "to", key2
+                        parse3Key = h2o.nodes[0].parse(s3nKey, key2,
+                            timeoutSecs=timeoutSecs,
+                            retryDelaySecs=retryDelaySecs,
+                            pollTimeoutSecs=pollTimeoutSecs,
+                            noPoll=noPoll,
+                            benchmarkLogging=benchmarkLogging)
 
                 elapsed = time.time() - start
                 print "Parse #", trial, "completed in", "%6.2f" % elapsed, "seconds.", \
@@ -213,7 +181,7 @@ class Basic(unittest.TestCase):
                 # BUG here?
                 if not noPoll:
                     # We should be able to see the parse result?
-                    check_enums_from_inspect(parseKey)
+                    h2o_cmd.check_enums_from_inspect(parseKey)
                         
                 # the nflx data doesn't have a small enough # of classes in any col
                 # use exec to randomFilter out 200 rows for a quick RF. that should work for everyone?
@@ -231,7 +199,8 @@ class Basic(unittest.TestCase):
                 ### RFview = h2o_cmd.runRFOnly(trees=1,depth=25,parseKey=newParseKey, timeoutSecs=timeoutSecs)
                 ### h2b.browseJsonHistoryAsUrlLastMatch("RFView")
 
-                delete_csv_key(csvFilename, importFullList)
+                h2o_cmd.check_key_distribution()
+                h2o_cmd.delete_csv_key(csvFilename, importFullList)
                 h2o.tear_down_cloud()
                 if not localhost:
                     print "Waiting 30 secs before building cloud again (sticky ports?)"

@@ -475,7 +475,7 @@ def check_sandbox_for_errors(sandbox_ignore_errors=False):
                 'found multiple|exception|error|assert|killing|killed|required ports',
                 re.IGNORECASE)
             regex2 = re.compile('Caused',re.IGNORECASE)
-            regex3 = re.compile('warn|info', re.IGNORECASE)
+            regex3 = re.compile('warn|info|TCP', re.IGNORECASE)
 
             # there are many hdfs/apache messages with error in the text. treat as warning if they have '[WARN]'
             # i.e. they start with:
@@ -492,7 +492,8 @@ def check_sandbox_for_errors(sandbox_ignore_errors=False):
                 foundBad = False
                 if not ' bytes)' in line:
                     # no multiline FSM on this 
-                    printSingleWarning = regex3.search(line) and not ('[Loaded ' in line)
+                    # ignore the [WARN] from 'RestS3Service'
+                    printSingleWarning = regex3.search(line) and not ('[Loaded ' in line) and not ('RestS3Service' in line)
                     #   13190  280      ###        sun.nio.ch.DatagramChannelImpl::ensureOpen (16 bytes)
 
                     # don't detect these class loader info messags as errors
@@ -723,7 +724,7 @@ class H2O(object):
             requests.get(
                 self.__url('PutValue.json'), 
                 params={"value": value, "key": key, "replication_factor": repl}),
-            extraComment = str(value) + "," + str(key) + "," + str(repl))
+                extraComment = str(value) + "," + str(key) + "," + str(repl))
 
     def put_file(self, f, key=None, timeoutSecs=60):
         if key is None:
@@ -736,7 +737,7 @@ class H2O(object):
                 timeout=timeoutSecs,
                 params={"key": key},
                 files={"file": open(f, 'rb')}),
-            extraComment = str(f))
+                extraComment = str(f))
 
         verboseprint("\nput_file response: ", dump_json(resp))
         return key
@@ -861,8 +862,12 @@ class H2O(object):
         verboseprint("\nKMeans result:", dump_json(a))
         return a
 
-    # params: header=1, 
+    # params: 
+    # header=1, 
+    # separator=1 (hex encode?
+    # exclude=
     # noise is a 2-tuple: ("StoreView",params_dict)
+    
     def parse(self, key, key2=None, 
         timeoutSecs=300, retryDelaySecs=0.2, initialDelaySecs=None, pollTimeoutSecs=30,
         noise=None, benchmarkLogging=False, noPoll=False, **kwargs):
@@ -914,6 +919,9 @@ class H2O(object):
 
     def jstack(self):
         return self.__check_request(requests.get(self.__url("JStack.json")))
+
+    def iostatus(self):
+        return self.__check_request(requests.get(self.__url("IOStatus.json")))
 
     # &offset=
     # &view=
@@ -1092,7 +1100,7 @@ class H2O(object):
                 self.__url('RFTreeView.json'),
                 timeout=timeoutSecs,
                 params=params_dict),
-            ignoreH2oError=ignoreH2oError)
+                ignoreH2oError=ignoreH2oError)
 
         verboseprint("\nrandom_forest_treeview result:", dump_json(a))
         # Always do it to eyeball?
@@ -1346,9 +1354,11 @@ class H2O(object):
         if self.random_udp_drop or random_udp_drop:
             args += ['--random_udp_drop']
 
-        if self.enable_h2o_log:
-            args += ['--log']
+        if self.disable_h2o_log:
+            args += ['--nolog']
 
+        # disable logging of requests, as some contain "error", which fails the test
+        args += ['--no_requests_log']
         return args
 
     def __init__(self, 
@@ -1363,7 +1373,7 @@ class H2O(object):
         use_home_for_ice=False, node_id=None, username=None,
         random_udp_drop=False,
         redirect_import_folder_to_s3_path=None,
-        enable_h2o_log=True, 
+        disable_h2o_log=False, 
         enable_benchmark_log=False,
         ):
  
@@ -1411,7 +1421,7 @@ class H2O(object):
         self.sandbox_ignore_errors = False
 
         self.random_udp_drop = random_udp_drop
-        self.enable_h2o_log = enable_h2o_log
+        self.disable_h2o_log = disable_h2o_log
 
         # this dumps stats from tests, and perf stats while polling to benchmark.log
         self.enable_benchmark_log = enable_benchmark_log

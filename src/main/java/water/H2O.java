@@ -381,7 +381,8 @@ public final class H2O {
   public static final byte    GET_KEY_PRIORITY = MAX_PRIORITY-3;
   public static final byte    PUT_KEY_PRIORITY = MAX_PRIORITY-4;
   public static final byte     ATOMIC_PRIORITY = MAX_PRIORITY-5;
-  public static final byte     MIN_HI_PRIORITY = MAX_PRIORITY-5;
+  public static final byte        GUI_PRIORITY = MAX_PRIORITY-6;
+  public static final byte     MIN_HI_PRIORITY = MAX_PRIORITY-6;
   public static final byte        MIN_PRIORITY = 0;
 
   // F/J threads that remember the priority of the last task they started
@@ -412,8 +413,11 @@ public final class H2O {
   // Capped at a small number of threads per pool.
   private static final ForkJoinPool2 FJPS[] = new ForkJoinPool2[MAX_PRIORITY+1];
   static {
-    for( int i=MIN_HI_PRIORITY; i<=MAX_PRIORITY; i++ )
-      FJPS[i] = new ForkJoinPool2(i,NUMCPUS); // 1 thread per pool
+    // Only need 1 thread for the AckAck work, as it cannot block
+    FJPS[ACK_ACK_PRIORITY] = new ForkJoinPool2(ACK_ACK_PRIORITY,1);
+    for( int i=MIN_HI_PRIORITY+1; i<MAX_PRIORITY; i++ )
+      FJPS[i] = new ForkJoinPool2(i,NUMCPUS); // All CPUs, but no more for blocking purposes
+    FJPS[GUI_PRIORITY] = new ForkJoinPool2(GUI_PRIORITY,2);
     FJPS[0] = FJP_NORM;
   }
 
@@ -491,7 +495,8 @@ public final class H2O {
     public String keepice; // Do not delete ice on startup
     public String soft = null; // soft launch for demos
     public String random_udp_drop = null; // test only, randomly drop udp incoming
-    public String log = null; // add machine name, PID and time to logs
+    public String nolog = null; // disable logging
+    public String no_requests_log = null; // disable logging of Web requests
   }
   public static boolean IS_SYSTEM_RUNNING = false;
 
@@ -507,7 +512,7 @@ public final class H2O {
     arguments.extract(OPT_ARGS);
     ARGS = arguments.toStringArray();
 
-    if(OPT_ARGS.log != null)
+    if(OPT_ARGS.nolog == null)
       Log.initHeaders();
 
     startLocalNode(); // start the local node
