@@ -88,6 +88,7 @@ public class RequestServer extends NanoHTTPD {
     registerRequest(new TypeaheadFileRequest());
     registerRequest(new TypeaheadS3BucketRequest());
     registerRequest(new TypeaheadHdfsPathRequest());
+    registerRequest(new ColumnEnumValues());
 
     // testing hooks
     registerRequest(new TestPoll());
