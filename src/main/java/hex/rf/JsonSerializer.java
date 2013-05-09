@@ -18,8 +18,8 @@ public class JsonSerializer extends TreePrinter
 {
     JsonObject root;
 
-    public JsonSerializer(JsonObject root, Column[] columns, String[]classNames) {
-        super(columns, classNames);
+    public JsonSerializer(JsonObject root, Column[] columns, int[] colMapping, String[]classNames) {
+        super(columns, colMapping, classNames);
         this.root = root;
     }
 

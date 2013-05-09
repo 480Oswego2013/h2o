@@ -55,7 +55,7 @@ public class TreeRenderer {
   public JsonElement json() {
     try {
       JsonObject root = new JsonObject();
-      new JsonSerializer(root, _columns, _domain).walk_serialized_tree(new AutoBuffer(_treeBits));
+      new JsonSerializer(root, _columns, _mapping, _domain).walk_serialized_tree(new AutoBuffer(_treeBits));
       return root;
     } catch( Exception e ) {
       e.printStackTrace();

@@ -44,12 +44,8 @@ public class RFTreeView extends Request {
     int depth = (int)(dl>>>32);
     int leaves= (int)(dl&0xFFFFFFFFL);
 
-<<<<<<< HEAD
-    TreeRenderer renderer = new TreeRenderer(model, tree, va, classCol);
-=======
     Response r = Response.done(res);
     TreeRenderer renderer = new TreeRenderer(model, tree, va);
->>>>>>> 15c12468ce867a1291056303f71f6796e6a140df
     String graph = renderer.graphviz();
     String code = renderer.code();
 
@@ -57,7 +53,6 @@ public class RFTreeView extends Request {
     res.addProperty(TREE_LEAVES, leaves);
     res.add("tree", renderer.json().getAsJsonObject().get("value"));
 
-    Response r = Response.done(res);
     r.addHeader("<h2>Tree " + tree + "</h2>" + graph + code);
     return r;
   }
