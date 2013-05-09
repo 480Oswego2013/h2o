@@ -7,7 +7,10 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
 import water.*;
+import water.api.Script.RunScript;
 import water.api.Upload.PostFile;
+import water.util.Log;
+import water.util.Log.Tag.Sys;
 
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Closeables;
@@ -19,8 +22,8 @@ public class RequestServer extends NanoHTTPD {
   private static final ConcurrentHashMap<String,byte[]> _cache = new ConcurrentHashMap();
   protected static final HashMap<String,Request> _requests = new HashMap();
 
-  private static final Request _http404;
-  private static final Request _http500;
+  static final Request _http404;
+  static final Request _http500;
 
   // initialization ------------------------------------------------------------
   static {
@@ -49,6 +52,7 @@ public class RequestServer extends NanoHTTPD {
     Request.addToNavbar(registerRequest(new RFScore()),     "Random Forest", "Score");
     Request.addToNavbar(registerRequest(new GLMScore()),    "GLM",           "Score");
     Request.addToNavbar(registerRequest(new KMeansScore()), "KMeans",        "Score");
+    Request.addToNavbar(registerRequest(new KMeansApply()), "KMeans Apply",  "Score");
     Request.addToNavbar(registerRequest(new Score()),       "Apply Model",   "Score");
 
     //Request.addToNavbar(registerRequest(new Plot()),        "Basic",         "Plot");
@@ -60,6 +64,7 @@ public class RequestServer extends NanoHTTPD {
     Request.addToNavbar(registerRequest(new JStack()),      "Stack Dump",    "Admin");
     Request.addToNavbar(registerRequest(new Debug()),       "Debug Dump",    "Admin");
     Request.addToNavbar(registerRequest(new LogView()),     "Inspect Log",   "Admin");
+    Request.addToNavbar(registerRequest(new Script()),      "Get Script",    "Admin");
     Request.addToNavbar(registerRequest(new Shutdown()),    "Shutdown",      "Admin");
 
     Request.addToNavbar(registerRequest(new Tutorials()),           "View All",      "Tutorials");
@@ -74,6 +79,7 @@ public class RequestServer extends NanoHTTPD {
     registerRequest(new GLMGridProgress());
     registerRequest(new GLMProgressPage());
     registerRequest(new GetVector());
+    registerRequest(new LogView.LogDownload());
     registerRequest(new RReaderProgress());
     registerRequest(new PostFile());
     registerRequest(new Progress());
@@ -83,12 +89,18 @@ public class RequestServer extends NanoHTTPD {
     registerRequest(new RemoveAck());
     registerRequest(new RFView());
     registerRequest(new RFTreeView());
+    registerRequest(new RunScript());
     registerRequest(new TypeaheadKeysRequest("Existing H2O Key", "", null));
     registerRequest(new TypeaheadHexKeyRequest());
     registerRequest(new TypeaheadFileRequest());
     registerRequest(new TypeaheadS3BucketRequest());
     registerRequest(new TypeaheadHdfsPathRequest());
+<<<<<<< HEAD
     registerRequest(new ColumnEnumValues());
+=======
+    registerRequest(new TypeaheadRFModelKeyRequest());
+    registerRequest(new TypeaheadGLMModelKeyRequest());
+>>>>>>> 15c12468ce867a1291056303f71f6796e6a140df
 
     // testing hooks
     registerRequest(new TestPoll());
@@ -102,11 +114,10 @@ public class RequestServer extends NanoHTTPD {
    */
 
   protected static Request registerRequest(Request req) {
-    String href = req.getClass().getSimpleName();
+    String href = req.href();
     assert (! _requests.containsKey(href)) : "Request with href "+href+" already registered";
     _requests.put(href,req);
     return req;
-
   }
 
   // Keep spinning until we get to launch the NanoHTTPD
@@ -119,7 +130,7 @@ public class RequestServer extends NanoHTTPD {
               new RequestServer(H2O._apiSocket);
               break;
             } catch ( Exception ioe ) {
-              System.err.println("Launching NanoHTTP server got "+ioe);
+              Log.err(Sys.HTTPD,"Launching NanoHTTP server got ",ioe);
               try { Thread.sleep(1000); } catch( InterruptedException e ) { } // prevent denial-of-service
             }
           }
@@ -172,7 +183,7 @@ public class RequestServer extends NanoHTTPD {
       if (resource != null) {
         try {
           bytes = ByteStreams.toByteArray(resource);
-        } catch( IOException e ) { }
+        } catch( IOException e ) { Log.err(e); }
         byte[] res = _cache.putIfAbsent(uri,bytes);
         if( res != null ) bytes = res; // Racey update; take what is in the _cache
       }

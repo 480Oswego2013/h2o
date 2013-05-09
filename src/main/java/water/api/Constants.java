@@ -39,6 +39,7 @@ public class Constants {
   public static final String COLS                  = "cols";
   public static final String CONSENSUS             = "consensus";
   public static final String CONTENTS              = "contents";
+  public static final String COUNT                 = "count";
   public static final String DATA_KEY              = "data_key";
   public static final String DEPTH                 = "depth";
   public static final String DESCRIPTION           = "description";
@@ -68,6 +69,7 @@ public class Constants {
   public static final String HELP                  = "help";
   public static final String IGNORE                = "ignore";
   public static final String ITEMS                 = "items";
+  public static final String ITERATIVE_CM          = "iterative_cm";
   public static final String JOB                   = "job";
   public static final String JOBS                  = "jobs";
   public static final String JSON_H2O              = "h2o";
@@ -89,6 +91,7 @@ public class Constants {
   public static final String MODELS                = "models";
   public static final String MORE                  = "more";
   public static final String MTRY                  = "mtry";
+  public static final String MTRY_NODES            = "mtry_nodes";
   public static final String NAME                  = "name";
   public static final String NEG_X                 = "neg_x";
   public static final String NO_CM                 = "no_confusion_matrix";
@@ -140,6 +143,7 @@ public class Constants {
   public static final String SYSTEM_LOAD           = "system_load";
   public static final String TASK_KEY              = "task_key";
   public static final String TCPS_ACTIVE           = "tcps_active";
+  public static final String TCPS_DUTY             = "tcp_duty_cycle";
   public static final String TIME                  = "time";
   public static final String TOT_MEM               = "tot_mem" + Suffixes.BYTES;
   public static final String TREE_COUNT            = "number_built";

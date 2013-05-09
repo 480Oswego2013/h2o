@@ -2,6 +2,8 @@ package water;
 
 import java.util.*;
 
+import water.util.Log;
+
 public class TypeMap {
   static public final short NULL = (short) -1;
   static public final short PRIM_B = 1;
@@ -18,10 +20,10 @@ public class TypeMap {
     "hex.DGLM$GLMParams",
     "hex.DGLM$GLMValidation",
     "hex.DGLM$GLMValidationFunc",
-    "hex.DGLM$Gram",
-    "hex.DGLM$GramMatrixFunc",
     "hex.DGLM$GLMXValTask",
     "hex.DGLM$GLMXvalSetup",
+    "hex.DGLM$Gram",
+    "hex.DGLM$GramMatrixFunc",
     "hex.DLSM$ADMMSolver",
     "hex.DLSM$GeneralizedGradientSolver",
     "hex.DLSM$LSMSolver",
@@ -32,6 +34,8 @@ public class TypeMap {
     "hex.Histogram$BinningTask",
     "hex.Histogram$Bins",
     "hex.Histogram$OutlineTask",
+    "hex.KMeans$KMeansApply",
+    "hex.KMeans$KMeansApply$2",
     "hex.KMeans$KMeansModel",
     "hex.KMeans$KMeansScore",
     "hex.KMeans$Lloyds",
@@ -45,11 +49,13 @@ public class TypeMap {
     "hex.NewRowVecTask$DataFrame",
     "hex.NewRowVecTask$RowFunc",
     "hex.Plot$Pixels",
-    "hex.Plot$Res",
     "hex.RowVecTask",
     "hex.RowVecTask$Sampling",
     "hex.rf.Confusion",
-    "hex.rf.DRF",
+    "hex.rf.DRF$DRFJob",
+    "hex.rf.DRF$DRFParams",
+    "hex.rf.DRF$DRFTask",
+    "hex.rf.DRF$DRFTask$1",
     "hex.rf.MinorityClasses$ClassExtractTask",
     "hex.rf.MinorityClasses$CountMClassRowsTask",
     "hex.rf.MinorityClasses$HistogramTask",
@@ -61,6 +67,7 @@ public class TypeMap {
     "water.AtomicTest$Append$1",
     "water.AutoSerialTest",
     "water.BitsCmpTask",
+    "water.CoreTest$CPULoad",
     "water.DRemoteTask",
     "water.DTask",
     "water.Freezable",
@@ -71,19 +78,16 @@ public class TypeMap {
     "water.Job$1",
     "water.Job$2",
     "water.Job$3",
-    "water.Job$Fail",
-    "water.Job$List",
+    "water.Job$ChunkProgress",
     "water.Job$ChunkProgressJob",
     "water.Job$ChunkProgressJob$1",
-    "water.Job$ChunkProgress",
-    "water.Job$ChunkProgressJob$2",
+    "water.Job$Fail",
+    "water.Job$List",
     "water.KVTest$Atomic2",
     "water.KVTest$ByteHisto",
     "water.KVTest$RemoteBitSet",
     "water.Key",
     "water.Key$Ary",
-    "water.Log$LogStr",
-    "water.Log$Wrapper$1",
     "water.MRTask",
     "water.Model",
     "water.NOPTask",
@@ -94,6 +98,7 @@ public class TypeMap {
     "water.Value",
     "water.ValueArray",
     "water.ValueArray$Column",
+    "water.api.Script$Done",
     "water.exec.AddOperator",
     "water.exec.AndOperator",
     "water.exec.BooleanVectorFilter",
@@ -158,14 +163,19 @@ public class TypeMap {
     "water.parser.DParseTask$AtomicUnion",
     "water.parser.Enum",
     "water.parser.ParseDataset",
+    "water.parser.ParseDataset$1",
     "water.parser.ParseDataset$2",
+    "water.parser.ParseDataset$FileInfo",
     "water.parser.ParseDataset$Progress",
-    "water.parser.ParseDataset$UnzipTask",
+    "water.parser.ParseDataset$UnzipAndParseTask",
     "water.store.s3.MultipartUpload",
     "water.store.s3.MultipartUpload$1",
     "water.store.s3.MultipartUpload$Progress",
     "water.util.FileIntegrityChecker",
     "water.util.JStackCollectorTask",
+    "water.util.Log$1",
+    "water.util.Log$LogStr",
+    "water.util.LogCollectorTask",
   };
   static private final HashMap<String,Integer> MAP = new HashMap();
   static {
@@ -180,7 +190,7 @@ public class TypeMap {
   static public int onLoad(String className) {
     Integer I = MAP.get(className);
     if(I == null)
-      throw new RuntimeException("TypeMap missing " + className);
+      throw Log.err(new RuntimeException("TypeMap missing " + className));
     return I;
   }
 
@@ -190,7 +200,7 @@ public class TypeMap {
     Iced f = (Iced)GOLD[id];
     if( f == null ) {
       try { GOLD[id] = f = (Iced) Class.forName(CLAZZES[id]).newInstance(); }
-      catch( Exception e ) { throw new Error(e); }
+      catch( Exception e ) { throw  Log.errRTExcept(e); }
     }
     return f.newInstance();
   }
@@ -198,7 +208,7 @@ public class TypeMap {
     Freezable f = GOLD[id];
     if( f == null ) {
       try { GOLD[id] = f = (Freezable) Class.forName(CLAZZES[id]).newInstance(); }
-      catch( Exception e ) { throw new Error(e); }
+      catch( Exception e ) { throw  Log.errRTExcept(e); }
     }
     return f.newInstance();
   }
@@ -224,7 +234,8 @@ public class TypeMap {
       }
     }
     Collections.sort(list);
+    Log.unwrap(System.out, "");
     for(String s : list)
-      System.out.println("    \"" + s + "\",");
+      Log.unwrap(System.out, "    \"" + s + "\",");
   }
 }

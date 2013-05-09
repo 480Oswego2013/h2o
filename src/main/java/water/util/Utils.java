@@ -77,8 +77,6 @@ public class Utils {
     return result;
   }
 
-  public static void pln(String s) { System.out.println(s); }
-
   public static String sampleToString(int[] val, int max) {
     if (val == null || val.length < max) return Arrays.toString(val);
 
@@ -224,7 +222,7 @@ public class Utils {
     try {
       return console.readLine();
     } catch( IOException e ) {
-      throw new RuntimeException(e);
+      throw  Log.errRTExcept(e);
     }
   }
 
@@ -284,7 +282,7 @@ public class Utils {
     Futures fs = new Futures();
     Key k = c.importFile(0, fs);
     fs.blockForPending();
-    ParseDataset.parse(okey, new Key[]{k});
+    ParseDataset.forkParseDataset(okey, new Key[]{k}, null).get();
     UKV.remove(k);
     ValueArray res = DKV.get(okey).get();
     return res;

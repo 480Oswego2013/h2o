@@ -33,13 +33,18 @@ class Basic(unittest.TestCase):
             # ("syn_datasets/syn_7350063254201195578_10000x200.csv_000[23][0-9]", "syn_20.csv", 20 * avgSynSize, 700),
             # ("syn_datasets/syn_7350063254201195578_10000x200.csv_000[45678][0-9]", "syn_50.csv", 50 * avgSynSize, 700),
 
+#             ("[A-D]-800-manyfiles-nflx-gz/file_[0-9]*.dat.gz", "file_A_800_x55.dat.gz", 800 * (avgMichalSize/2), 7200),
+#             ("manyfiles-nflx-gz/file_[123][0-9][0-9].dat.gz", "file_300_A.dat.gz", 300 * avgMichalSize, 3600),
+#             ("[A-D]-800-manyfiles-nflx-gz/file_[0-9]*.dat.gz", "file_B_800_x55.dat.gz", 800 * (avgMichalSize/2), 7200),
+#             ("[A-D]-800-manyfiles-nflx-gz/file_[0-9]*.dat.gz", "file_C_800_x55.dat.gz", 800 * (avgMichalSize/2), 7200),
+#             ("[A-D]-800-manyfiles-nflx-gz/file_[0-9]*.dat.gz", "file_D_800_x55.dat.gz", 800 * (avgMichalSize/2), 7200),
+#             ("[A-D]-800-manyfiles-nflx-gz/file_[0-9]*.dat.gz", "file_E_800_x55.dat.gz", 800 * (avgMichalSize/2), 7200),
+#             ("[A-D]-800-manyfiles-nflx-gz/file_[0-9]*.dat.gz", "file_F_800_x55.dat.gz", 800 * (avgMichalSize/2), 7200),
+#             ("manyfiles-nflx-gz/file_[123][0-9][0-9].dat.gz", "file_300_B.dat.gz", 300 * avgMichalSize, 3600),
+#            ("manyfiles-nflx-gz/file_[123][0-9][0-9].dat.gz", "file_300_C.dat.gz", 300 * avgMichalSize, 3600),
             ("manyfiles-nflx-gz/file_1.dat.gz", "file_1.dat.gz", 1 * avgMichalSize, 300),
             ("manyfiles-nflx-gz/file_[2][0-9].dat.gz", "file_10.dat.gz", 10 * avgMichalSize, 700),
             ("manyfiles-nflx-gz/file_[34][0-9].dat.gz", "file_20.dat.gz", 20 * avgMichalSize, 900),
-
-            ("manyfiles-nflx-gz/file_[123][0-9][0-9].dat.gz", "file_300_A.dat.gz", 300 * avgMichalSize, 3600),
-            ("manyfiles-nflx-gz/file_[123][0-9][0-9].dat.gz", "file_300_B.dat.gz", 300 * avgMichalSize, 3600),
-            ("manyfiles-nflx-gz/file_[123][0-9][0-9].dat.gz", "file_300_C.dat.gz", 300 * avgMichalSize, 3600),
             ("manyfiles-nflx-gz/file_[5-9][0-9].dat.gz", "file_50_A.dat.gz", 50 * avgMichalSize, 3600),
             ("manyfiles-nflx-gz/file_1[0-4][0-9].dat.gz", "file_50_B.dat.gz", 50 * avgMichalSize, 3600),
             ("manyfiles-nflx-gz/file_1[0-9][0-9].dat.gz", "file_100_A.dat.gz", 100 * avgMichalSize, 3600),
@@ -51,10 +56,11 @@ class Basic(unittest.TestCase):
         print "Using the -.gz files from s3"
         # want just s3n://home-0xdiag-datasets/manyfiles-nflx-gz/file_1.dat.gz
     
-        DO_GLM = True
+        DO_GLM = False
         USE_S3 = False
         noPoll = False
-        benchmarkLogging = ['cpu','disk']
+        benchmarkLogging = ['jstack','iostats']
+        benchmarkLogging = ['iostats']
         bucket = "home-0xdiag-datasets"
         if USE_S3:
             URI = "s3://home-0xdiag-datasets"
@@ -70,10 +76,12 @@ class Basic(unittest.TestCase):
         # use i to forward reference in the list, so we can do multiple outstanding parses below
         for i, (csvFilepattern, csvFilename, totalBytes, timeoutSecs) in enumerate(csvFilenameList):
             ## for tryHeap in [54, 28]:
-            for tryHeap in [30]:
+            for tryHeap in [28]:
                 
                 print "\n", tryHeap,"GB heap, 1 jvm per host, import", protocol, "then parse"
+                jea = "-XX:+UseParNewGC -XX:+UseConcMarkSweepGC"
                 h2o_hosts.build_cloud_with_hosts(node_count=1, java_heap_GB=tryHeap,
+                    # java_extra_args=jea,
                     enable_benchmark_log=True, timeoutSecs=120, retryDelaySecs=10,
                     # all hdfs info is done thru the hdfs_config michal's ec2 config sets up?
                     # this is for our amazon ec hdfs
@@ -181,38 +189,20 @@ class Basic(unittest.TestCase):
 
                     #**********************************************************************************
                     # Do GLM too
-                    # these are all the columns that are enums in the dataset...too many for GLM!
-                    x = range(542) # don't include the output column
-                    x.remove(3)
-                    x.remove(4)
-                    x.remove(5)
-                    x.remove(6)
-                    x.remove(7)
-                    x.remove(8)
-                    x.remove(9)
-                    x.remove(10)
-                    x.remove(11)
-                    x.remove(14)
-                    x.remove(16)
-                    x.remove(17)
-                    x.remove(18)
-                    x.remove(19)
-                    x.remove(20)
-                    x.remove(424)
-                    x.remove(425)
-                    x.remove(426)
-                    x.remove(540)
-                    x.remove(541)
-                    # remove the output too!
-                    x.remove(378)
-                    x = ",".join(map(str,x))
-
                     # Argument case error: Value 0.0 is not between 12.0 and 9987.0 (inclusive)
                     if DO_GLM:
+                        # these are all the columns that are enums in the dataset...too many for GLM!
+                        x = range(542) # don't include the output column
+                        # remove the output too! (378)
+                        for i in [3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 16, 17, 18, 19, 20, 424, 425, 426, 540, 541, 378]:
+                            x.remove(i)
+                        x = ",".join(map(str,x))
+
                         GLMkwargs = {'x': x, 'y': 378, 'case': 15, 'case_mode': '>', 
                             'max_iter': 10, 'n_folds': 1, 'alpha': 0.2, 'lambda': 1e-5}
                         start = time.time()
-                        glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, **GLMkwargs)
+                        glm = h2o_cmd.runGLMOnly(parseKey=parseKey, timeoutSecs=timeoutSecs, 
+                            benchmarkLogging=benchmarkLogging, **GLMkwargs)
                         h2o_glm.simpleCheckGLM(self, glm, None, **GLMkwargs)
                         elapsed = time.time() - start
                         h2o.check_sandbox_for_errors()
@@ -220,17 +210,18 @@ class Basic(unittest.TestCase):
                             len(h2o.nodes), tryHeap, csvFilepattern, csvFilename, elapsed)
                         print l
                         h2o.cloudPerfH2O.message(l)
-                    #**********************************************************************************
 
+                    #**********************************************************************************
                     print "Deleting key in H2O so we get it from S3 (if ec2) or nfs again.", \
                           "Otherwise it would just parse the cached key."
-                    storeView = h2o.nodes[0].store_view()
+                    ### storeView = h2o.nodes[0].store_view()
                     ### print "storeView:", h2o.dump_json(storeView)
                     # "key": "s3n://home-0xdiag-datasets/manyfiles-nflx-gz/file_84.dat.gz"
                     # have to do the pattern match ourself, to figure out what keys to delete
                     # we're deleting the keys in the initial import. We leave the keys we created
                     # by the parse. We use unique dest keys for those, so no worries.
                     # Leaving them is good because things fill up! (spill)
+                    h2o_cmd.check_key_distribution()
                     h2o_cmd.delete_csv_key(csvFilename, s3nFullList)
 
                 h2o.tear_down_cloud()

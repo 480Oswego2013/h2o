@@ -8,6 +8,7 @@ import java.util.concurrent.ExecutionException;
 
 import water.H2O.H2OCountedCompleter;
 import water.Job.ProgressMonitor;
+import water.util.Log;
 
 /**
 * Large Arrays & Arraylets
@@ -97,7 +98,7 @@ public class ValueArray extends Iced implements Cloneable {
 
   @Override public ValueArray clone() {
     try { return (ValueArray)super.clone(); }
-    catch( CloneNotSupportedException cne ) { throw H2O.unimpl(); }
+    catch( CloneNotSupportedException cne ) { throw Log.err(H2O.unimpl()); }
   }
 
   // Init of transient fields from deserialization calls
@@ -134,18 +135,24 @@ public class ValueArray extends Iced implements Cloneable {
   public boolean hasInvalidRows(int colnum) { return _cols[colnum]._n != _numrows; }
 
   /** Rows in this chunk */
+  @SuppressWarnings("cast")
   public int rpc(long chunknum) {
     if( (long)(int)chunknum!=chunknum ) throw H2O.unimpl(); // more than 2^31 chunks?
     if( _rpc != null ) return (int)(_rpc[(int)chunknum+1]-_rpc[(int)chunknum]);
     int rpc = (int)(CHUNK_SZ/_rowsize);
-    long chunks = Math.max(1,_numrows/rpc);
+    return rpc(chunknum, rpc, _numrows);
+  }
+
+  public static int rpc(long chunknum, int rpc, long numrows) {
+    long chunks = Math.max(1,numrows/rpc);
     assert chunknum < chunks;
     if( chunknum < chunks-1 )   // Not last chunk?
       return rpc;               // Rows per chunk
-    return (int)(_numrows - (chunks-1)*rpc);
+    return (int)(numrows - (chunks-1)*rpc);
   }
 
   /** Row number at the start of this chunk */
+  @SuppressWarnings("cast")
   public long startRow( long chunknum) {
     if( (long)(int)chunknum!=chunknum ) throw H2O.unimpl(); // more than 2^31 chunks?
     if( _rpc != null ) return _rpc[(int)chunknum];
@@ -167,18 +174,21 @@ public class ValueArray extends Iced implements Cloneable {
   }
 
   /** Chunk number containing a row */
-  private long chknum( long rownum ) {
-    if( _rpc == null ) {
-      int rpc = (int)(CHUNK_SZ/_rowsize);
-      return Math.min(rownum/rpc,Math.max(1,_numrows/rpc)-1);
-    }
+  public long chknum( long rownum ) {
+    if( _rpc == null )
+      return chknum(rownum, _numrows, _rowsize);
     int bs = Arrays.binarySearch(_rpc,rownum);
     if( bs < 0 ) bs = -bs-2;
     while( _rpc[bs+1]==rownum ) bs++;
     return bs;
   }
 
-  // internal convience class for building structured ValueArrays
+  public static long chknum( long rownum, long numrows, int rowsize ) {
+    int rpc = (int)(CHUNK_SZ/rowsize);
+    return Math.min(rownum/rpc,Math.max(1,numrows/rpc)-1);
+  }
+
+  // internal convenience class for building structured ValueArrays
   static public class Column extends Iced implements Cloneable {
     public String _name;
     // Domain of the column - all the strings which represents the column's
@@ -247,7 +257,7 @@ public class ValueArray extends Iced implements Cloneable {
     return datad(getChunk(chknum),rowInChunk(chknum,rownum),colnum);
   }
 
-  // This is a version where the colnum data is not yet pulled out.
+  // This is a version where the column data is not yet pulled out.
   public double datad(AutoBuffer ab, int row_in_chunk, int colnum) {
     return datad(ab,row_in_chunk,_cols[colnum]);
   }
@@ -382,12 +392,12 @@ public class ValueArray extends Iced implements Cloneable {
       // Especially if the InputStream is a (g)unzip, its useful to overlap the
       // write with read.
       H2OCountedCompleter subtask = new H2OCountedCompleter() {
-          @Override public void compute2() {
-            DKV.put(val._key,val,fs); // The only exciting thing in this innerclass!
-            tryComplete();
-          }
-          @Override public byte priority() { return H2O.ATOMIC_PRIORITY; }
-        };
+        @Override public void compute2() {
+          DKV.put(val._key,val,fs,!val._key.home() && H2O.get(val._key) == null); // The only exciting thing in this innerclass!
+          tryComplete();
+        }
+        @Override public byte priority() { return H2O.ATOMIC_PRIORITY; }
+      };
       H2O.submitTask(subtask);
       // Also add the DKV task to the blocking list (not just the TaskPutKey
       // buried inside the DKV!)
@@ -399,14 +409,14 @@ public class ValueArray extends Iced implements Cloneable {
     // Last chunk is short, read it; combine buffers and make the last chunk larger
     if( cidx > 0 ) {
       Key ckey = getChunkKey(cidx-1,key); // Get last chunk written out
-      byte[] newbuf = Arrays.copyOf(oldbuf,(int)(off+CHUNK_SZ));
+      byte[] newbuf = MemoryManager.arrayCopyOf(oldbuf,(int)(off+CHUNK_SZ));
       System.arraycopy(buf,0,newbuf,(int)CHUNK_SZ,off);
       // Block for the last DKV to happen, because we're overwriting the last one
       // with final size bits.
       try { f_last.get(); }
-      catch( InterruptedException ie ) { throw new RuntimeException(ie); }
-      catch(   ExecutionException ee ) { throw new RuntimeException(ee); }
-      assert DKV.get(ckey).memOrLoad()==oldbuf; // Maybe false-alarms under high-memory-pressure?
+      catch( InterruptedException e ) { throw  Log.errRTExcept(e); }
+      catch(   ExecutionException e ) { throw  Log.errRTExcept(e); }
+      assert Arrays.equals(DKV.get(ckey).memOrLoad(),oldbuf);
       DKV.put(ckey,new Value(ckey,newbuf),fs); // Overwrite the old too-small Value
     } else {
       Key ckey = getChunkKey(cidx,key);

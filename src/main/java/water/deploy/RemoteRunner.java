@@ -1,9 +1,9 @@
-package water.sys;
+package water.deploy;
 
 import java.io.File;
 import java.util.ArrayList;
 
-import water.sys.VM.Watchdog;
+import water.deploy.VM.Watchdog;
 import water.util.Utils;
 
 public class RemoteRunner {
@@ -36,8 +36,7 @@ public class RemoteRunner {
       if( onWindows.exists() ) {
         list.add(onWindows.getPath());
         list.add("--login");
-      } else
-        list.add("bash");
+      } else list.add("bash");
       list.add(sh.getAbsolutePath());
       exec(list);
     }

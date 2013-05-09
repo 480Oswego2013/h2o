@@ -1,8 +1,8 @@
 package water;
 
-import water.*;
-import water.util.Counter;
 import java.util.Arrays;
+
+import water.api.Constants;
 
 /**
  * A Model models reality (hopefully).
@@ -50,7 +50,7 @@ public abstract class Model extends Iced {
       Cs[i]._size = 8;
     }
     ValueArray.Column C = Cs[Cs.length-1] = new ValueArray.Column();
-    C._name = "response";
+    C._name = Constants.RESPONSE;
     C._domain = classNames;
     C._min = 0.0;
     C._max = classNames==null ? 0 : classNames.length-1;

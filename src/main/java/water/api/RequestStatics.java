@@ -5,6 +5,8 @@ import java.net.URLEncoder;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import water.util.Log;
+
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -42,6 +44,7 @@ public class RequestStatics extends Constants {
     query(".query"), ///< Displays the query for the argument in html mode
     debug(".debug"), ///< Displays the webpage without query
     png(".png"), ///< image, e.g. plot
+    txt(".txt"), ///< text, e.g. a script
     ;
     /** Suffix of the request - extension of the URL.
      */
@@ -65,6 +68,8 @@ public class RequestStatics extends Constants {
         return debug;
       if (requestUrl.endsWith(png._suffix))
         return png;
+      if (requestUrl.endsWith(txt._suffix))
+        return txt;
       return json;
     }
 
@@ -132,7 +137,7 @@ public class RequestStatics extends Constants {
       try {
         sb.append(URLEncoder.encode(e.getAsString(),"UTF-8"));
       } catch (UnsupportedEncodingException ex) {
-        assert (false): ex.toString();
+        throw  Log.errRTExcept(ex);
       }
     }
     return sb.toString();
